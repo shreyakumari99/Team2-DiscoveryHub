@@ -1,0 +1,16 @@
+# Data generator configuration.
+# Override at runtime, e.g.:
+#   mvn spring-boot:run -Dspring-boot.run.arguments="--ingestion.url=http://localhost:8081 --count=10000"
+ingestion:
+  url: http://localhost:8081
+count: 10000
+
+spring:
+  main:
+    web-application-type: none
+  application:
+    name: data-generator
+
+logging:
+  level:
+    com.smarsh.discoveryhub: INFO
