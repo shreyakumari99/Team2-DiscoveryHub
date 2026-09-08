@@ -1,0 +1,9 @@
+{
+  "eventId": "11111111-1111-1111-1111-111111111111",
+  "eventType": "MESSAGE_INGESTED",
+  "version": 1,
+  "occurredAt": "2026-09-08T10:00:00Z",
+  "messageId": "22222222-2222-2222-2222-222222222222",
+  "sourceMessageId": "EMAIL-123",
+  "sourceSystem": "GENERATOR"
+}
