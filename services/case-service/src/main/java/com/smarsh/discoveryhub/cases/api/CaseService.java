@@ -14,9 +14,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Business logic for cases, custodians and evidence (FR-2).
@@ -139,8 +142,17 @@ public class CaseService {
         return caseRepository.save(c);
     }
 
+    /**
+     * Adding a message that is already on the case is a no-op, not an error:
+     * re-adding one hit from an overlapping search is routine, and the
+     * investigator's intent ("this message belongs to this case") is already
+     * satisfied.
+     */
     public List<EvidenceItem> addEvidence(String id, AddEvidenceRequest request) {
-        CaseEntity c = requireWritable(id);
+        requireWritable(id);
+        if (evidenceRepository.existsByCaseIdAndMessageId(id, request.messageId())) {
+            return evidenceRepository.findByCaseId(id);
+        }
         EvidenceItem item = new EvidenceItem(id, request.messageId(),
                 request.source() != null ? request.source() : "manual", Instant.now());
         evidenceRepository.save(item);
@@ -150,17 +162,34 @@ public class CaseService {
         return evidenceRepository.findByCaseId(id);
     }
 
+    /**
+     * Bulk add (FR-3.6), skipping messages already on the case.
+     *
+     * <p>The duplicates must be filtered out <em>before</em> the inserts are
+     * queued. {@code save} only registers the entity with the persistence
+     * context; the INSERT runs at the next flush, which is the query at the end
+     * of this method. A per-item {@code catch} around {@code save} therefore
+     * never fires — the violation is raised after the loop has finished, fails
+     * the whole request, and marks the transaction rollback-only, so not even
+     * the new items are added. Adding a page of search results twice used to
+     * 500 for exactly that reason.
+     */
     public List<EvidenceItem> addEvidenceBulk(String id, AddEvidenceBulkRequest request) {
-        CaseEntity c = requireWritable(id);
+        requireWritable(id);
+        // Seeded with what is already on the case; `add` returning false then
+        // also collapses duplicates within the request itself.
+        Set<String> seen = evidenceRepository.findByCaseId(id).stream()
+                .map(EvidenceItem::getMessageId)
+                .collect(Collectors.toCollection(HashSet::new));
+        String source = request.source() != null ? request.source() : "search";
+
         for (String mid : request.messageIds()) {
-            try {
-                evidenceRepository.save(new EvidenceItem(id, mid,
-                        request.source() != null ? request.source() : "search", Instant.now()));
-                auditTrail.record(AuditRecord.action("EVIDENCE_ADDED").on("EVIDENCE", mid).inCase(id)
-                        .after("messageId", mid).after("source", "search"));
-            } catch (org.springframework.dao.DataIntegrityViolationException ignored) {
-                // (caseId, messageId) already present — skip duplicates.
+            if (!seen.add(mid)) {
+                continue;
             }
+            evidenceRepository.save(new EvidenceItem(id, mid, source, Instant.now()));
+            auditTrail.record(AuditRecord.action("EVIDENCE_ADDED").on("EVIDENCE", mid).inCase(id)
+                    .after("messageId", mid).after("source", source));
         }
         return evidenceRepository.findByCaseId(id);
     }
