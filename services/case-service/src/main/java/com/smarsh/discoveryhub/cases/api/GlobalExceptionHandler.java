@@ -1,5 +1,6 @@
 package com.smarsh.discoveryhub.cases.api;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -20,6 +21,17 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(CaseClosedException.class)
     public ResponseEntity<Map<String, Object>> handleClosed(CaseClosedException ex) {
         return conflict(ex.getMessage(), "CASE_CLOSED");
+    }
+
+    /**
+     * A constraint violation that reaches here is a conflict with existing
+     * data, not a server fault, so it must not surface as a 500. The known
+     * case — re-adding evidence already on the case — is filtered out before
+     * the insert; this is the net for the rest.
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<Map<String, Object>> handleConstraint(DataIntegrityViolationException ex) {
+        return conflict("The request conflicts with data that already exists", "CONSTRAINT_VIOLATION");
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
