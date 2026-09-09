@@ -1,0 +1,105 @@
+server:
+  port: ${SERVER_PORT:8085}
+
+spring:
+  application:
+    name: hold-retention-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/hold_db}
+    username: ${SPRING_DATASOURCE_USERNAME:discoveryhub}
+    password: ${SPRING_DATASOURCE_PASSWORD:discoveryhub}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: hold-retention-service
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.smarsh.discoveryhub.*"
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+search-service:
+  url: ${SEARCH_SERVICE_URL:http://localhost:8083}
+  # Resolving a hold's scope can page through the whole corpus, so it gets a
+  # longer read timeout than an ordinary inter-service call.
+  scope-timeout-seconds: ${SEARCH_SCOPE_TIMEOUT_SECONDS:60}
+archive-service:
+  url: ${ARCHIVE_SERVICE_URL:http://localhost:8082}
+case-service:
+  url: ${CASE_SERVICE_URL:http://localhost:8084}
+
+# NFR-2. Without an explicit read timeout the JDK HTTP client waits forever,
+# so a hung dependency would stall a disposition run rather than failing it.
+discoveryhub:
+  http:
+    connect-timeout: ${HTTP_CONNECT_TIMEOUT:PT2S}
+    read-timeout: ${HTTP_READ_TIMEOUT:PT10S}
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        slidingWindowSize: 20
+        minimumNumberOfCalls: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 20s
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        # A 409 means "this message is on legal hold" — the system working as
+        # designed. Counting it as a failure would open the breaker during a
+        # disposition run over held messages, which is exactly when the
+        # archive must stay reachable.
+        ignoreExceptions:
+          - org.springframework.web.client.HttpClientErrorException$NotFound
+          - org.springframework.web.client.HttpClientErrorException$Conflict
+    instances:
+      archive-service:
+        baseConfig: default
+      search-service:
+        baseConfig: default
+      case-service:
+        baseConfig: default
+  retry:
+    configs:
+      default:
+        maxAttempts: 3
+        waitDuration: 500ms
+        enableExponentialBackoff: true
+        exponentialBackoffMultiplier: 2
+        retryExceptions:
+          - org.springframework.web.client.ResourceAccessException
+          - org.springframework.web.client.HttpServerErrorException
+    instances:
+      # Deliberately no retry instance for archive-service: deleting is not
+      # safely repeatable, and the disposition record must reflect exactly
+      # what the archive answered.
+      search-service:
+        baseConfig: default
+      case-service:
+        baseConfig: default
+
+disposition:
+  enabled: ${DISPOSITION_ENABLED:true}
+  # Default hourly. For the demo set e.g. "0/30 * * * * *" (every 30s).
+  cron: ${DISPOSITION_CRON:0 0 * * * *}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    com.smarsh.discoveryhub: INFO
