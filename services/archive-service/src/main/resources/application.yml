@@ -1,0 +1,50 @@
+server:
+  port: ${SERVER_PORT:8082}
+
+spring:
+  application:
+    name: archive-service
+  data:
+    mongodb:
+      uri: ${SPRING_DATA_MONGODB_URI:mongodb://discoveryhub:discoveryhub@localhost:27017/archive?authSource=admin}
+      auto-index-creation: true
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: archive-service
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.smarsh.discoveryhub.*"
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+# Object storage for attachments. Credentials are NOT configured here: the AWS
+# SDK resolves them from the environment (AWS_ACCESS_KEY_ID /
+# AWS_SECRET_ACCESS_KEY) or an instance role, so no secret is ever committed.
+archive:
+  # Consumer threads for the Kafka listeners; matches the topic partition
+  # count so a bulk corpus load is not serialised behind one thread.
+  consumer-concurrency: ${ARCHIVE_CONSUMER_CONCURRENCY:3}
+
+aws:
+  s3:
+    region: ${AWS_REGION:us-east-1}
+    attachments-bucket: ${AWS_S3_ATTACHMENTS_BUCKET:discoveryhub-attachments}
+    # Leave empty for real AWS; set to target an S3-compatible endpoint.
+    endpoint: ${AWS_S3_ENDPOINT:}
+    path-style-access: ${AWS_S3_PATH_STYLE:false}
+    # Off against real AWS, where infra owns the bucket and the app's IAM user
+    # has no s3:CreateBucket.
+    auto-create-buckets: ${AWS_S3_AUTO_CREATE_BUCKETS:false}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    com.smarsh.discoveryhub: INFO
