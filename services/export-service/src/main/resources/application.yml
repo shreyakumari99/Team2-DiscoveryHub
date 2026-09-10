@@ -1,0 +1,102 @@
+server:
+  port: ${SERVER_PORT:8086}
+
+spring:
+  application:
+    name: export-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/export_db}
+    username: ${SPRING_DATASOURCE_USERNAME:discoveryhub}
+    password: ${SPRING_DATASOURCE_PASSWORD:discoveryhub}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+case-service:
+  url: ${CASE_SERVICE_URL:http://localhost:8084}
+archive-service:
+  url: ${ARCHIVE_SERVICE_URL:http://localhost:8082}
+
+# Object storage for export packages. Credentials come from the AWS SDK's
+# default provider chain (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY or an
+# instance role) — never from this file.
+aws:
+  s3:
+    region: ${AWS_REGION:us-east-1}
+    exports-bucket: ${AWS_S3_EXPORTS_BUCKET:discoveryhub-exports}
+    endpoint: ${AWS_S3_ENDPOINT:}
+    path-style-access: ${AWS_S3_PATH_STYLE:false}
+    auto-create-buckets: ${AWS_S3_AUTO_CREATE_BUCKETS:false}
+
+export:
+  link-expiry-minutes: ${EXPORT_LINK_EXPIRY_MINUTES:30}
+  # A job still RUNNING after this long was orphaned by a restart; the reaper
+  # fails it so it becomes retryable again (FR-6.6).
+  max-runtime-minutes: ${EXPORT_MAX_RUNTIME_MINUTES:30}
+  reaper-interval-ms: ${EXPORT_REAPER_INTERVAL_MS:60000}
+
+# NFR-2. The JDK HTTP client has no read timeout by default, so without these
+# a hung downstream service would stall an export thread indefinitely.
+discoveryhub:
+  http:
+    connect-timeout: ${HTTP_CONNECT_TIMEOUT:PT2S}
+    read-timeout: ${HTTP_READ_TIMEOUT:PT10S}
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        slidingWindowSize: 20
+        minimumNumberOfCalls: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 20s
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        # A 404 or a closed case is a valid answer, not a sign the dependency
+        # is unhealthy; counting them would trip the breaker on normal traffic.
+        ignoreExceptions:
+          - org.springframework.web.client.HttpClientErrorException$NotFound
+          - org.springframework.web.client.HttpClientErrorException$Conflict
+    instances:
+      archive-service:
+        baseConfig: default
+      case-service:
+        baseConfig: default
+  retry:
+    configs:
+      default:
+        maxAttempts: 3
+        waitDuration: 500ms
+        enableExponentialBackoff: true
+        exponentialBackoffMultiplier: 2
+        # Retry only transient transport failures. Retrying a 4xx just repeats
+        # a request the server already refused.
+        retryExceptions:
+          - org.springframework.web.client.ResourceAccessException
+          - org.springframework.web.client.HttpServerErrorException
+    instances:
+      archive-service:
+        baseConfig: default
+      case-service:
+        baseConfig: default
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    com.smarsh.discoveryhub: INFO
