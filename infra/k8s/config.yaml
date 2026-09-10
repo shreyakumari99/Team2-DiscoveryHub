@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: discoveryhub-config
+  labels:
+    app: discoveryhub
+data:
+  # In-cluster infrastructure endpoints.
+  kafka.bootstrap-servers: kafka:9092
+  spring.elasticsearch.uris: http://elasticsearch:9200
+
+  # Object storage is Amazon S3. Only non-secret settings live here —
+  # credentials come from the Secret below, or better, from an IRSA service
+  # account (see the note in that Secret).
+  aws.region: ap-south-1
+  aws.s3.attachments-bucket: attachments-smarsh
+  aws.s3.exports-bucket: export-packages-smarsh
+  # Empty for real AWS. Set to target an S3-compatible endpoint in-cluster,
+  # in which case also set aws.s3.path-style to "true".
+  aws.s3.endpoint: ""
+  aws.s3.path-style: "false"
+  # The buckets are provisioned by infrastructure, not by the application.
+  aws.s3.auto-create-buckets: "false"
+
+  # Service-to-service URLs.
+  search-service.url: http://search-service:8083
+  archive-service.url: http://archive-service:8082
+  case-service.url: http://case-service:8084
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: discoveryhub-secrets
+  labels:
+    app: discoveryhub
+type: Opaque
+stringData:
+  # DEMO VALUES ONLY — do not commit real credentials here. A Kubernetes
+  # Secret is base64-encoded, not encrypted, and is readable by anyone with
+  # get-secret rights on the namespace.
+  #
+  # Create it from the environment instead of applying this file verbatim:
+  #
+  #   kubectl create secret generic discoveryhub-secrets \
+  #     --from-literal=postgres.username="$POSTGRES_USER" \
+  #     --from-literal=postgres.password="$POSTGRES_PASSWORD" \
+  #     --from-literal=mongo.uri="$MONGODB_URI" \
+  #     --from-literal=aws.access-key-id="$AWS_ACCESS_KEY_ID" \
+  #     --from-literal=aws.secret-access-key="$AWS_SECRET_ACCESS_KEY"
+  #
+  # On EKS, drop the two AWS keys entirely and attach an IAM role to the
+  # service account (IRSA): the SDK's default credentials provider picks the
+  # role up automatically, so no long-lived key exists at all.
+  postgres.username: discoveryhub
+  postgres.password: discoveryhub
+  mongo.uri: mongodb://discoveryhub:discoveryhub@mongo:27017/archive?authSource=admin
+  aws.access-key-id: ""
+  aws.secret-access-key: ""

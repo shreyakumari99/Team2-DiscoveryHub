@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: export-service
+  labels: { app: discoveryhub, service: export-service }
+spec:
+  replicas: 1
+  selector: { matchLabels: { service: export-service } }
+  template:
+    metadata: { labels: { service: export-service } }
+    spec:
+      containers:
+        - name: export-service
+          image: discoveryhub/export-service:1.0.0-SNAPSHOT
+          ports: [{ containerPort: 8086 }]
+          env:
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: kafka.bootstrap-servers } }
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://postgres:5432/export_db
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom: { secretKeyRef: { name: discoveryhub-secrets, key: postgres.username } }
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom: { secretKeyRef: { name: discoveryhub-secrets, key: postgres.password } }
+            # S3 credentials come from the AWS SDK's default provider chain,
+            # which reads these variables. On EKS, remove both and attach an
+            # IAM role to the service account instead (IRSA).
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: { secretKeyRef: { name: discoveryhub-secrets, key: aws.access-key-id } }
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: discoveryhub-secrets, key: aws.secret-access-key } }
+            - name: AWS_REGION
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: aws.region } }
+            - name: AWS_S3_EXPORTS_BUCKET
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: aws.s3.exports-bucket } }
+            - name: AWS_S3_ENDPOINT
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: aws.s3.endpoint } }
+            - name: AWS_S3_PATH_STYLE
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: aws.s3.path-style } }
+            - name: AWS_S3_AUTO_CREATE_BUCKETS
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: aws.s3.auto-create-buckets } }
+            - name: ARCHIVE_SERVICE_URL
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: archive-service.url } }
+            - name: CASE_SERVICE_URL
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: case-service.url } }
+            - name: SERVER_PORT
+              value: "8086"
+          readinessProbe:
+            httpGet: { path: /actuator/health, port: 8086 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: export-service
+spec:
+  selector: { service: export-service }
+  ports: [{ port: 8086, targetPort: 8086 }]

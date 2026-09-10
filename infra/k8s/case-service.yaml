@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: case-service
+  labels: { app: discoveryhub, service: case-service }
+spec:
+  replicas: 1
+  selector: { matchLabels: { service: case-service } }
+  template:
+    metadata: { labels: { service: case-service } }
+    spec:
+      containers:
+        - name: case-service
+          image: discoveryhub/case-service:1.0.0-SNAPSHOT
+          ports: [{ containerPort: 8084 }]
+          env:
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: kafka.bootstrap-servers } }
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://postgres:5432/case_db
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom: { secretKeyRef: { name: discoveryhub-secrets, key: postgres.username } }
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom: { secretKeyRef: { name: discoveryhub-secrets, key: postgres.password } }
+            - name: SERVER_PORT
+              value: "8084"
+          readinessProbe:
+            httpGet: { path: /actuator/health, port: 8084 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: case-service
+spec:
+  selector: { service: case-service }
+  ports: [{ port: 8084, targetPort: 8084 }]
