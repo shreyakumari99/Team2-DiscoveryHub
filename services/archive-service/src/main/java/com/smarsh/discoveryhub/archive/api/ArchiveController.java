@@ -6,10 +6,13 @@ import com.smarsh.discoveryhub.archive.domain.MessageRepository;
 import com.smarsh.discoveryhub.archive.storage.AttachmentStore;
 import com.smarsh.discoveryhub.common.audit.AuditRecord;
 import com.smarsh.discoveryhub.common.audit.AuditTrail;
+import com.smarsh.discoveryhub.events.MessageDeletedEvent;
+import com.smarsh.discoveryhub.events.Topics;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -47,15 +51,18 @@ public class ArchiveController {
     private final LegalHoldLedger holdLedger;
     private final AttachmentStore storage;
     private final AuditTrail auditTrail;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
 
     public ArchiveController(MessageRepository repository,
                              LegalHoldLedger holdLedger,
                              AttachmentStore storage,
-                             AuditTrail auditTrail) {
+                             AuditTrail auditTrail,
+                             KafkaTemplate<String, Object> kafkaTemplate) {
         this.repository = repository;
         this.holdLedger = holdLedger;
         this.storage = storage;
         this.auditTrail = auditTrail;
+        this.kafkaTemplate = kafkaTemplate;
     }
 
     @GetMapping("/{id}")
@@ -136,14 +143,18 @@ public class ArchiveController {
     public Map<String, Long> heldCount(@RequestBody HeldCountRequest request) {
         long count = request.holdIds() == null ? 0
                 : request.holdIds().stream()
-                        .flatMap(holdId -> holdLedger.messagesCoveredBy(holdId).stream())
-                        .distinct()
-                        .count();
+                .flatMap(holdId -> holdLedger.messagesCoveredBy(holdId).stream())
+                .distinct()
+                .count();
         return Map.of("heldMessages", count);
     }
 
     /**
      * Delete a message. Refused with 409 if the message is on hold (FR-4.6).
+     *
+     * <p>On success, announces the deletion on {@link Topics#MESSAGE_DELETED} so
+     * search-service drops the document. On refusal, the blocked attempt is
+     * itself audited.
      *
      * @param reason optional - e.g. "disposition" when called by the retention job
      */
@@ -153,8 +164,18 @@ public class ArchiveController {
         ArchivedMessage message = repository.findById(id)
                 .orElseThrow(() -> new MessageNotFoundException(id));
 
+        String actor = reason != null ? reason : "api";
+
         if (message.held()) {
-            // The single most important check in the platform.
+            // The single most important check in the platform. The refusal is
+            // recorded before it is thrown: an attempt to destroy evidence that
+            // is under legal hold is exactly what a chain of custody has to be
+            // able to show, and the trail would otherwise be silent about it.
+            auditTrail.record(AuditRecord.action("MESSAGE_DELETE_BLOCKED")
+                    .on("MESSAGE", id)
+                    .by(actor)
+                    .before("held", true)
+                    .after("deleted", false));
             throw new MessageHeldException(id);
         }
 
@@ -164,7 +185,13 @@ public class ArchiveController {
             storage.removeAttachment(key);
         }
 
-        String actor = reason != null ? reason : "api";
+        // Tell search-service the message is gone. Published only after the
+        // delete has actually happened, so the index is never emptied for a
+        // message that survived; keyed by id so repeated deletes of the same
+        // message stay ordered on one partition.
+        kafkaTemplate.send(Topics.MESSAGE_DELETED, id,
+                new MessageDeletedEvent(id, actor, Instant.now()));
+
         auditTrail.record(AuditRecord.action("MESSAGE_DELETED")
                 .on("MESSAGE", id)
                 .by(actor)
