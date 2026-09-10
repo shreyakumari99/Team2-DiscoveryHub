@@ -60,3 +60,4 @@ volumes/
 # ---------- Misc ----------
 *.tmp
 *.bak
+.DS_Store

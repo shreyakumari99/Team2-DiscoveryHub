@@ -1,7 +1,5 @@
 package com.smarsh.discoveryhub.generator;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.smarsh.discoveryhub.events.MessageIngestedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,49 +9,69 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * The corpus generator (FR-1.2). Runs once on startup, posts {@code count}
- * messages to the ingestion-service REST API like a real client would, then
- * the process can be left running or stopped.
+ * The corpus generator (FR-1.2). Runs once on startup and posts {@code count}
+ * messages to the ingestion-service REST API exactly as a real client would.
  *
- * <p>Posts concurrently (virtual threads) so 10,000 messages finish in well
- * under a minute against a local ingestion-service.
+ * <p>Posts concurrently on virtual threads, but with the number of requests in
+ * flight <em>bounded</em>. Firing all 10,000 at once is trivial to write and
+ * does not work: it opens ten thousand simultaneous connections, overruns the
+ * server's accept queue, and roughly a seventh of the corpus is refused. The
+ * failures look like a platform fault but are self-inflicted load. A real
+ * client would rate-limit itself, so this one does too.
+ *
+ * <p>Transient failures are retried once, because a refused connection under
+ * load is not a reason to lose evidence. Retrying is safe: ingestion is
+ * idempotent on {@code sourceMessageId} (FR-1.6), so a duplicate delivery can
+ * never create a duplicate message.
  */
 @Component
 public class CorpusGenerator implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(CorpusGenerator.class);
+    private static final int RETRY_ATTEMPTS = 2;
+    private static final Duration RETRY_BACKOFF = Duration.ofMillis(250);
 
     private final RestClient restClient;
-    private final ObjectMapper objectMapper;
     private final String ingestionUrl;
     private final int count;
+    private final int concurrency;
 
     public CorpusGenerator(@Value("${ingestion.url:http://localhost:8081}") String ingestionUrl,
-                           @Value("${count:10000}") int count) {
+                           @Value("${count:10000}") int count,
+                           @Value("${concurrency:64}") int concurrency) {
         this.ingestionUrl = ingestionUrl;
         this.count = count;
+        this.concurrency = Math.max(1, concurrency);
         this.restClient = RestClient.builder().baseUrl(ingestionUrl).build();
-        this.objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     }
 
     @Override
     public void run(ApplicationArguments args) {
-        log.info("Generating {} messages against ingestion-service at {}", count, ingestionUrl);
+        log.info("Generating {} messages against ingestion-service at {} ({} requests in flight)",
+                count, ingestionUrl, concurrency);
         MessageFactory factory = new MessageFactory(42L);
 
         AtomicInteger ok = new AtomicInteger();
         AtomicInteger failed = new AtomicInteger();
         AtomicLong attachments = new AtomicLong();
+        AtomicInteger retried = new AtomicInteger();
+        Semaphore inFlight = new Semaphore(concurrency);
         Instant start = Instant.now();
 
-        try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
-            java.util.List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<Future<?>> futures = new ArrayList<>(count);
             for (int i = 0; i < count; i++) {
                 final int n = i;
                 futures.add(executor.submit(() -> {
@@ -61,42 +79,72 @@ public class CorpusGenerator implements ApplicationRunner {
                     if (!event.attachments().isEmpty()) {
                         attachments.incrementAndGet();
                     }
+                    inFlight.acquireUninterruptibly();
                     try {
-                        Map<String, Object> body = Map.of(
-                                "sourceMessageId", event.sourceMessageId(),
-                                "type", event.type().name(),
-                                "subject", event.subject() == null ? "" : event.subject(),
-                                "body", event.body(),
-                                "timestamp", event.timestamp().toString(),
-                                "sender", event.sender(),
-                                "participants", event.participants(),
-                                "threadId", event.threadId(),
-                                "attachments", event.attachments()
-                        );
-                        restClient.post()
-                                .uri("/api/v1/messages")
-                                .body(body)
-                                .retrieve()
-                                .toBodilessEntity();
-                        ok.incrementAndGet();
-                    } catch (Exception e) {
-                        failed.incrementAndGet();
-                        if (failed.get() <= 5) {
-                            log.warn("Failed to ingest message #{}: {}", n, e.getMessage());
+                        if (post(event, n, retried)) {
+                            ok.incrementAndGet();
+                        } else {
+                            failed.incrementAndGet();
                         }
+                    } finally {
+                        inFlight.release();
                     }
                 }));
             }
-            for (var f : futures) {
+            for (Future<?> f : futures) {
                 try {
                     f.get();
-                } catch (Exception ignored) {
+                } catch (Exception e) {
+                    log.debug("Generator task failed", e);
                 }
             }
         }
 
-        long seconds = java.time.Duration.between(start, Instant.now()).getSeconds();
-        log.info("Corpus generation complete: {} accepted, {} failed, {} with attachments, in {}s",
-                ok.get(), failed.get(), attachments.get(), seconds);
+        long seconds = Duration.between(start, Instant.now()).getSeconds();
+        log.info("Corpus generation complete: {} accepted, {} failed, {} with attachments, "
+                        + "{} retried, in {}s",
+                ok.get(), failed.get(), attachments.get(), retried.get(), seconds);
+
+        if (failed.get() > 0) {
+            log.warn("{} messages could not be ingested. Lower --concurrency and re-run; "
+                    + "ingestion is idempotent, so re-running cannot duplicate anything.", failed.get());
+        }
+    }
+
+    /** @return true once the message is accepted, false if every attempt failed */
+    private boolean post(MessageIngestedEvent event, int index, AtomicInteger retried) {
+        Map<String, Object> body = Map.of(
+                "sourceMessageId", event.sourceMessageId(),
+                "type", event.type().name(),
+                "subject", event.subject() == null ? "" : event.subject(),
+                "body", event.body(),
+                "timestamp", event.timestamp().toString(),
+                "sender", event.sender(),
+                "participants", event.participants(),
+                "threadId", event.threadId(),
+                "attachments", event.attachments());
+
+        for (int attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
+            try {
+                restClient.post().uri("/api/v1/messages").body(body).retrieve().toBodilessEntity();
+                return true;
+            } catch (Exception e) {
+                if (attempt == RETRY_ATTEMPTS) {
+                    log.debug("Message #{} failed after {} attempts: {}", index, attempt, e.getMessage());
+                    return false;
+                }
+                retried.incrementAndGet();
+                sleep(RETRY_BACKOFF);
+            }
+        }
+        return false;
+    }
+
+    private static void sleep(Duration duration) {
+        try {
+            Thread.sleep(duration.toMillis());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }
