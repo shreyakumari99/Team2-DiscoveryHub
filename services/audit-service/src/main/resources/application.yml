@@ -1,0 +1,49 @@
+server:
+  port: ${SERVER_PORT:8087}
+
+spring:
+  application:
+    name: audit-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/audit_db}
+    username: ${SPRING_DATASOURCE_USERNAME:discoveryhub}
+    password: ${SPRING_DATASOURCE_PASSWORD:discoveryhub}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    # Runs data-postgresql.sql AFTER Hibernate has created audit_log, which is
+    # what lets the append-only triggers attach to an existing table (FR-7.3).
+    defer-datasource-initialization: true
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  sql:
+    init:
+      mode: always
+      # Selects data-postgresql.sql. Tests running on H2 override this, since
+      # the guard is written in PL/pgSQL.
+      platform: ${SQL_INIT_PLATFORM:postgresql}
+      # Spring's script runner splits on ';' and does not understand PL/pgSQL
+      # dollar-quoting, which would cut the trigger function's body in half.
+      separator: ';;'
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: audit-service
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.smarsh.discoveryhub.*"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    com.smarsh.discoveryhub: INFO
