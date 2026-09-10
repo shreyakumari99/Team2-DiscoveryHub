@@ -1,0 +1,332 @@
+# =============================================================================
+# DiscoveryHub - full stack, single-command startup (NFR-4)
+#
+#   docker compose up -d --build
+#
+# Infrastructure only (for running services from your IDE):
+#   docker compose up -d postgres mongo elasticsearch kafka init-setup
+#
+# CREDENTIALS: copy .env.example to .env and fill in your AWS keys before the
+# first run. Object storage is Amazon S3, so archive-service (attachments) and
+# export-service (packages) need working credentials; everything else runs
+# locally in containers. .env is gitignored — never commit it.
+#
+# NOTE on "no shared database schemas" (NFR-1): a single Postgres instance is
+# used for the 4 Postgres-backed services, but each one connects to its OWN
+# database (case_db / hold_db / export_db / audit_db) created by
+# infra/docker/init-postgres.sh. No service reads another's schema. For full
+# isolation you can split this into 4 Postgres containers - see docs/architecture.md.
+#
+# Build contexts point at the repo root so each service Dockerfile can COPY the
+# sibling services/shared-contracts module (every service depends on it).
+# =============================================================================
+name: discoveryhub
+
+services:
+  # ---------------------------------------------------------------------------
+  # Infrastructure
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: dh-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-discoveryhub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-discoveryhub}
+      POSTGRES_DB: ${POSTGRES_USER:-discoveryhub}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/docker/init-postgres.sh:/docker-entrypoint-initdb.d/init-postgres.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-discoveryhub}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Local MongoDB, only for running without Atlas. Start it with
+  #   docker compose --profile local-mongo up -d
+  # and leave MONGODB_URI unset in .env. With Atlas configured this container
+  # is dead weight, so it stays out of the default startup.
+  mongo:
+    profiles: ["local-mongo"]
+    image: mongo:7
+    container_name: dh-mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: discoveryhub
+      MONGO_INITDB_ROOT_PASSWORD: discoveryhub
+      MONGO_INITDB_DATABASE: archive
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: dh-elasticsearch
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  # apache/kafka runs as the non-root `appuser` (uid 1000), but a freshly
+  # created named volume is owned by root — so the broker cannot write
+  # meta.properties and exits immediately. This hands the volume over before
+  # Kafka starts, which is what lets `docker compose up` work first time on a
+  # clean machine instead of needing a manual chown (NFR-4).
+  kafka-init:
+    image: alpine:3.20
+    container_name: dh-kafka-init
+    command: ["sh", "-c", "chown -R 1000:1000 /data && echo 'kafka data dir ready'"]
+    volumes:
+      - kafka-data:/data
+    restart: "no"
+
+  kafka:
+    # Single-node Kafka in KRaft mode (no Zookeeper). Uses the official
+    # apache/kafka image (Bitnami removed its docker.io images). NOTE: the
+    # official image drops its bundled server.properties defaults the moment
+    # ANY KAFKA_* override is set, so the single-node-critical factors must be
+    # set explicitly here -- otherwise offsets.topic.replication.factor falls
+    # back to Kafka's built-in default of 3, the controller can't create
+    # __consumer_offsets on a 1-broker cluster, and consumers can never join
+    # (FindCoordinator hangs, fetches return nothing). The image's configure
+    # script reads CLUSTER_ID (not KAFKA_CLUSTER_ID) for KRaft formatting.
+    image: apache/kafka:3.7.0
+    container_name: dh-kafka
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      CLUSTER_ID: VWki407XQBuBzJrE6AS1BA
+      KAFKA_NODE_ID: 0
+      KAFKA_PROCESS_ROLES: controller,broker
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka-data:/tmp/kraft-combined-logs
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+
+  # Creates Kafka topics on first boot. S3 buckets are created by the services
+  # themselves on startup when they have permission to do so.
+  init-setup:
+    image: apache/kafka:3.7.0
+    container_name: dh-init-setup
+    depends_on:
+      kafka:
+        condition: service_healthy
+    # apache/kafka's /bin/sh is busybox ash (no bash arrays); run setup.sh
+    # under /bin/bash to match its `#!/bin/bash` shebang.
+    entrypoint: ["/bin/bash", "/setup.sh"]
+    volumes:
+      - ./infra/docker/setup.sh:/setup.sh:ro
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # Backend services
+  # ---------------------------------------------------------------------------
+  ingestion-service:
+    build:
+      context: .
+      dockerfile: services/ingestion-service/Dockerfile
+    container_name: dh-ingestion
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SERVER_PORT: "8081"
+    ports:
+      - "8081:8081"
+
+  archive-service:
+    build:
+      context: .
+      dockerfile: services/archive-service/Dockerfile
+    container_name: dh-archive
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      # MongoDB Atlas by default (set in .env). To run fully offline instead,
+      # unset MONGODB_URI and start the local-mongo profile.
+      SPRING_DATA_MONGODB_URI: ${MONGODB_URI:-mongodb://discoveryhub:discoveryhub@mongo:27017/archive?authSource=admin}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # S3 credentials come from the AWS SDK's default provider chain, which
+      # reads these environment variables. They are supplied by .env and are
+      # never baked into the image or committed.
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_S3_ATTACHMENTS_BUCKET: ${AWS_S3_ATTACHMENTS_BUCKET:-discoveryhub-attachments}
+      # Empty for real AWS; set to target an S3-compatible endpoint instead.
+      AWS_S3_ENDPOINT: ${AWS_S3_ENDPOINT:-}
+      AWS_S3_PATH_STYLE: ${AWS_S3_PATH_STYLE:-false}
+      AWS_S3_AUTO_CREATE_BUCKETS: ${AWS_S3_AUTO_CREATE_BUCKETS:-false}
+      SERVER_PORT: "8082"
+    ports:
+      - "8082:8082"
+
+  search-service:
+    build:
+      context: .
+      dockerfile: services/search-service/Dockerfile
+    container_name: dh-search
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SERVER_PORT: "8083"
+    ports:
+      - "8083:8083"
+
+  case-service:
+    build:
+      context: .
+      dockerfile: services/case-service/Dockerfile
+    container_name: dh-case
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: ${CASE_DB_URL:-jdbc:postgresql://postgres:5432/case_db}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-discoveryhub}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-discoveryhub}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SERVER_PORT: "8084"
+    ports:
+      - "8084:8084"
+
+  hold-retention-service:
+    build:
+      context: .
+      dockerfile: services/hold-retention-service/Dockerfile
+    container_name: dh-hold
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      search-service:
+        condition: service_started
+    environment:
+      SPRING_DATASOURCE_URL: ${HOLD_DB_URL:-jdbc:postgresql://postgres:5432/hold_db}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-discoveryhub}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-discoveryhub}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SEARCH_SERVICE_URL: http://search-service:8083
+      ARCHIVE_SERVICE_URL: http://archive-service:8082
+      CASE_SERVICE_URL: http://case-service:8084
+      SERVER_PORT: "8085"
+    ports:
+      - "8085:8085"
+
+  export-service:
+    build:
+      context: .
+      dockerfile: services/export-service/Dockerfile
+    container_name: dh-export
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: ${EXPORT_DB_URL:-jdbc:postgresql://postgres:5432/export_db}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-discoveryhub}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-discoveryhub}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_S3_EXPORTS_BUCKET: ${AWS_S3_EXPORTS_BUCKET:-discoveryhub-exports}
+      AWS_S3_ENDPOINT: ${AWS_S3_ENDPOINT:-}
+      AWS_S3_PATH_STYLE: ${AWS_S3_PATH_STYLE:-false}
+      AWS_S3_AUTO_CREATE_BUCKETS: ${AWS_S3_AUTO_CREATE_BUCKETS:-false}
+      ARCHIVE_SERVICE_URL: http://archive-service:8082
+      CASE_SERVICE_URL: http://case-service:8084
+      SERVER_PORT: "8086"
+    ports:
+      - "8086:8086"
+
+  audit-service:
+    build:
+      context: .
+      dockerfile: services/audit-service/Dockerfile
+    container_name: dh-audit
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: ${AUDIT_DB_URL:-jdbc:postgresql://postgres:5432/audit_db}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-discoveryhub}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-discoveryhub}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SERVER_PORT: "8087"
+    ports:
+      - "8087:8087"
+
+  # ---------------------------------------------------------------------------
+  # Frontend
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: dh-frontend
+    depends_on:
+      - ingestion-service
+      - search-service
+      - case-service
+      - hold-retention-service
+      - export-service
+      - audit-service
+    ports:
+      - "8080:80"
+
+# ---------------------------------------------------------------------------
+volumes:
+  postgres-data:
+  mongo-data:
+  es-data:
+  kafka-data:
