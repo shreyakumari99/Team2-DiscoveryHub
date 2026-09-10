@@ -8,10 +8,14 @@ import com.smarsh.discoveryhub.archive.domain.MessageRepository;
 import com.smarsh.discoveryhub.archive.storage.AttachmentStore;
 import com.smarsh.discoveryhub.common.audit.AuditRecord;
 import com.smarsh.discoveryhub.common.audit.RecordingAuditTrail;
+import com.smarsh.discoveryhub.events.MessageDeletedEvent;
 import com.smarsh.discoveryhub.events.MessageType;
+import com.smarsh.discoveryhub.events.Topics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -23,6 +27,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -48,14 +53,18 @@ class ArchiveControllerTest {
     private LegalHoldLedger holdLedger;
     private AttachmentStore storage;
     private RecordingAuditTrail auditTrail;
+    private KafkaTemplate<String, Object> kafkaTemplate;
 
     @BeforeEach
+    @SuppressWarnings("unchecked")
     void setUp() {
         repository = mock(MessageRepository.class);
         holdLedger = mock(LegalHoldLedger.class);
         storage = mock(AttachmentStore.class);
         auditTrail = new RecordingAuditTrail();
-        ArchiveController controller = new ArchiveController(repository, holdLedger, storage, auditTrail);
+        kafkaTemplate = mock(KafkaTemplate.class);
+        ArchiveController controller =
+                new ArchiveController(repository, holdLedger, storage, auditTrail, kafkaTemplate);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -128,6 +137,27 @@ class ArchiveControllerTest {
                 .andExpect(jsonPath("$.reason").value("LEGAL_HOLD"));
 
         verify(repository, never()).deleteById(any());
+        // A refused delete must not tell search the message is gone, or the
+        // index would drop a message the archive still holds.
+        verify(kafkaTemplate, never()).send(anyString(), anyString(), any());
+    }
+
+    /**
+     * A refused deletion is itself evidence. If someone tries to destroy a
+     * message that is under legal hold, the trail has to show the attempt —
+     * a silent 409 leaves no record that it ever happened.
+     */
+    @Test
+    void blockedDeleteAttemptIsAudited() throws Exception {
+        when(repository.findById(anyString())).thenReturn(Optional.of(message("held-2", "hold-a")));
+
+        mockMvc.perform(delete("/api/v1/messages/held-2").param("reason", "rogue-admin"))
+                .andExpect(status().isConflict());
+
+        AuditRecord entry = auditTrail.firstWithAction("MESSAGE_DELETE_BLOCKED").orElseThrow();
+        assertThat(entry.entityType()).isEqualTo("MESSAGE");
+        assertThat(entry.entityId()).isEqualTo("held-2");
+        assertThat(entry.actor()).isEqualTo("rogue-admin");
     }
 
     @Test
@@ -153,6 +183,26 @@ class ArchiveControllerTest {
         assertThat(entry.entityType()).isEqualTo("MESSAGE");
         assertThat(entry.entityId()).isEqualTo("free-2");
         assertThat(entry.actor()).isEqualTo("disposition");
+    }
+
+    /**
+     * FR-5.2: deleting a message has to reach the search index too. Without
+     * this announcement the archive and the index diverge permanently — the
+     * message stays searchable and every hit on it 404s, so a disposition run
+     * looks as though it deleted nothing.
+     */
+    @Test
+    void deletedMessageIsAnnouncedToSearch() throws Exception {
+        when(repository.findById(anyString())).thenReturn(Optional.of(message("free-3")));
+
+        mockMvc.perform(delete("/api/v1/messages/free-3").param("reason", "disposition"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<MessageDeletedEvent> captor = ArgumentCaptor.forClass(MessageDeletedEvent.class);
+        verify(kafkaTemplate).send(eq(Topics.MESSAGE_DELETED), eq("free-3"), captor.capture());
+        assertThat(captor.getValue().messageId()).isEqualTo("free-3");
+        assertThat(captor.getValue().reason()).isEqualTo("disposition");
+        assertThat(captor.getValue().deletedAt()).isNotNull();
     }
 
     /** FR-8.2 dashboard counts come from the archive, the system of record. */
