@@ -1,9 +1,0 @@
-{
-  "eventId": "99999999-9999-9999-9999-999999999999",
-  "eventType": "CASE_CHANGED",
-  "version": 1,
-  "occurredAt": "2026-09-08T10:00:05Z",
-  "caseId": "77777777-7777-7777-7777-777777777777",
-  "previousState": "ACTIVE",
-  "newState": "UNDER_REVIEW"
-}

@@ -1,9 +1,0 @@
-{
-  "eventId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-  "eventType": "EXPORT_REQUESTED",
-  "version": 1,
-  "occurredAt": "2026-09-08T10:00:06Z",
-  "exportJobId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-  "caseId": "77777777-7777-7777-7777-777777777777",
-  "scope": "EVIDENCE"
-}
