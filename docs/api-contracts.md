@@ -166,10 +166,16 @@ the service — correct for genuinely unattended work like the disposition job.
 `sourceMessageId`, `type`, `subject`, `body`, `timestamp`, `sender`,
 `participants`, `threadId`, `attachments`).
 
+Ingestion and archive both serve `/api/v1/messages`, so the browser cannot
+reach them through one prefix. The frontend posts to `/api/v1/ingestion`, and
+both the dev-server proxy and nginx rewrite that back to `/api/v1/messages` on
+ingestion-service; the service itself is unaware of the alias.
+
 ### archive-service
 | Method | Path | Returns |
 | --- | --- | --- |
 | GET | `/api/v1/messages/{id}` | 200 `ArchivedMessage` (404 if missing) |
+| GET | `/api/v1/messages/by-source/{sourceMessageId}` | 200 `ArchivedMessage` (404 if not archived yet, or no longer archived) |
 | GET | `/api/v1/messages?ids=a,b,c` | 200 `ArchivedMessage[]` — bulk fetch; unknown ids are omitted, not an error |
 | GET | `/api/v1/messages/{id}/attachments/{index}` | 200 raw bytes (`application/octet-stream`); 404 if out of range — FR-6.3 |
 | GET | `/api/v1/messages/by-hold/{holdId}` | 200 `string[]` — ids frozen by that hold, backs hold-scoped export (FR-6.1) |
@@ -180,6 +186,11 @@ the service — correct for genuinely unattended work like the disposition job.
 `ArchivedMessage` carries `holdIds` — the set of active holds covering it —
 alongside the denormalized `held` boolean. `held` is always
 `!holdIds.isEmpty()`; the two cannot disagree (FR-4.5).
+
+`by-source` exists because ingestion answers 202 with only the source id, so a
+client that has just submitted a message has no way to name it afterwards. It
+is what the demo disposition polls: 404 until the message is archived, then the
+archive id it needs to delete, then 404 again once the deletion has happened.
 
 A missing message is **404**; a malformed request is **400**. These are kept
 apart because the disposition job treats 404 as "already gone", and collapsing
