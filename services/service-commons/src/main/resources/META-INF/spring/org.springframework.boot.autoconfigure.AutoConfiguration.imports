@@ -1,0 +1,2 @@
+com.smarsh.discoveryhub.common.config.ServiceCommonsAutoConfiguration
+com.smarsh.discoveryhub.common.storage.S3StorageAutoConfiguration
