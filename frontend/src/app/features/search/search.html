@@ -1,0 +1,181 @@
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Search</h1>
+    <p class="page-subtitle">
+      Full-text across subject, body and participants, with filters,
+      highlighting and bulk add-to-case (FR-3).
+    </p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="toolbar">
+    <label class="field grow">
+      <span class="field-label">Query</span>
+      <input
+        placeholder="Search… e.g. bonus pool forecast"
+        [value]="query()"
+        (input)="query.set($any($event.target).value)"
+        (keydown)="searchOnEnter($event)"
+      />
+    </label>
+    <label class="field">
+      <span class="field-label">Type</span>
+      <select [value]="typeFilter()" (change)="typeFilter.set($any($event.target).value)">
+        <option value="BOTH">All types</option>
+        <option value="EMAIL">Email</option>
+        <option value="CHAT">Chat</option>
+      </select>
+    </label>
+    <label class="field">
+      <span class="field-label">Sort by</span>
+      <select [value]="sort()" (change)="sort.set($any($event.target).value)">
+        <option value="relevance">Relevance</option>
+        <option value="date">Date</option>
+      </select>
+    </label>
+    <button class="primary" (click)="page.set(0); run()">Search</button>
+    <button class="ghost" (click)="resetFilters()">Reset</button>
+  </div>
+
+  <div class="toolbar">
+    <label class="field">
+      <span class="field-label">From</span>
+      <input type="date" [value]="dateFrom()" (change)="dateFrom.set($any($event.target).value)" />
+    </label>
+    <label class="field">
+      <span class="field-label">To</span>
+      <input type="date" [value]="dateTo()" (change)="dateTo.set($any($event.target).value)" />
+    </label>
+    <label class="check">
+      <input type="checkbox" [checked]="onHoldOnly()" (change)="onHoldOnly.set($any($event.target).checked)" />
+      On hold
+    </label>
+    <label class="check">
+      <input type="checkbox" [checked]="hasAttachmentOnly()" (change)="hasAttachmentOnly.set($any($event.target).checked)" />
+      Has attachment
+    </label>
+  </div>
+
+  @if (custodians().length) {
+    <details>
+      <summary>
+        Custodians
+        @if (selectedCustodians().length) {
+          <span class="badge active">{{ selectedCustodians().length }} selected</span>
+        }
+      </summary>
+      <div class="check-grid">
+        @for (c of custodians(); track c.id) {
+          <label class="check">
+            <input
+              type="checkbox"
+              [checked]="selectedCustodians().includes(c.email)"
+              (change)="toggleCustodian(c.email, $any($event.target).checked)"
+            />
+            <span>{{ c.name }} <span class="muted">({{ c.email }})</span></span>
+          </label>
+        }
+      </div>
+    </details>
+  }
+</div>
+
+<div class="card">
+  <div class="section-title">
+    <h3>Work with these results</h3>
+  </div>
+
+  <div class="toolbar">
+    <label class="field grow">
+      <span class="field-label">Add to case</span>
+      <select [value]="addToCaseId()" (change)="onCaseChange($any($event.target).value)">
+        <option value="">— choose a case —</option>
+        @for (c of openCases(); track c.id) {
+          <option [value]="c.id">{{ c.name }} ({{ c.state }})</option>
+        }
+      </select>
+    </label>
+    <button (click)="addPageToCase()">Add this page</button>
+    <button (click)="addAllResultsToCase()">Add all results</button>
+  </div>
+
+  <div class="toolbar">
+    <label class="field grow">
+      <span class="field-label">Save this search</span>
+      <input
+        placeholder="Name this search to save it"
+        [value]="saveAsName()"
+        (input)="saveAsName.set($any($event.target).value)"
+      />
+    </label>
+    <button (click)="saveSearch()">Save search</button>
+  </div>
+
+  @if (savedSearches().length) {
+    <div class="card-hint">
+      <div class="row tight">
+        <span class="muted">Saved searches:</span>
+        @for (s of savedSearches(); track s.id) {
+          <button class="sm" (click)="runSavedSearch(s)">▸ {{ s.name }}</button>
+        }
+      </div>
+    </div>
+  }
+</div>
+
+@if (error()) {
+  <div class="alert error"><div>{{ error() }}</div></div>
+}
+@if (notice()) {
+  <div class="alert success"><div>{{ notice() }}</div></div>
+}
+
+@if (loading()) {
+  <div class="card">
+    <div class="skeleton-list">
+      <span class="skeleton"></span>
+      <span class="skeleton"></span>
+      <span class="skeleton"></span>
+    </div>
+  </div>
+}
+
+@if (response(); as r) {
+  <div class="result-summary">
+    <strong>{{ r.totalHits }} hits</strong>
+    <span class="muted">page {{ r.page + 1 }} of {{ r.totalPages || 1 }}</span>
+  </div>
+
+  @for (h of r.hits; track h.id) {
+    <div class="card result">
+      <div class="result-head">
+        <span class="result-title">
+          @if (h.subject) { {{ h.subject }} } @else { (chat) }
+        </span>
+        <span class="muted small">{{ h.timestamp | date: 'medium' }}</span>
+      </div>
+      <div class="result-meta">
+        <span class="badge">{{ h.type }}</span>
+        @if (h.held) { <span class="badge held">on hold</span> }
+        @if (h.hasAttachment) { <span class="badge active">attachment</span> }
+        <span class="muted small">{{ h.sender }}</span>
+      </div>
+      @if (h.highlight?.['body']) {
+        <p class="result-snippet" [innerHTML]="bodyHighlight(h)"></p>
+      } @else if (h.highlight?.['subject']) {
+        <p class="result-snippet" [innerHTML]="subjectHighlight(h)"></p>
+      }
+    </div>
+  } @empty {
+    <div class="card">
+      <p class="empty">No messages match these filters.</p>
+    </div>
+  }
+
+  <div class="pagination">
+    <button (click)="prevPage()" [disabled]="page() === 0">← Prev</button>
+    <span class="muted small">page {{ r.page + 1 }} of {{ r.totalPages || 1 }}</span>
+    <button (click)="nextPage()" [disabled]="page() + 1 >= (r.totalPages || 1)">Next →</button>
+  </div>
+}

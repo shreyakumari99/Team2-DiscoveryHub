@@ -1,0 +1,172 @@
+<div class="page-header">
+  <div>
+    <h1 class="page-title">
+      Legal Holds
+      @if (resolvingHolds().length) {
+        <span class="badge run live">resolving scope</span>
+      }
+    </h1>
+    <p class="page-subtitle">
+      Preservation orders over the corpus. A held message cannot be deleted by
+      anyone, including the retention scheduler (FR-4).
+    </p>
+  </div>
+  <div class="page-actions">
+    <input
+      placeholder="filter by case id"
+      [value]="filterCaseId()"
+      (input)="filterCaseId.set($any($event.target).value)"
+      (keydown.enter)="refresh()"
+    />
+    <button (click)="refresh()">Refresh</button>
+  </div>
+</div>
+
+@if (error()) {
+  <div class="alert error"><div>{{ error() }}</div></div>
+}
+@if (notice()) {
+  <div class="alert success"><div>{{ notice() }}</div></div>
+}
+
+<div class="card">
+  <div class="section-title">
+    <h3>Place a hold</h3>
+  </div>
+
+  <div class="toolbar">
+    <label class="field grow">
+      <span class="field-label">Case</span>
+      <select
+        [value]="form().caseId"
+        (change)="form.set({ ...form(), caseId: $any($event.target).value })"
+      >
+        <option value="">— choose a case —</option>
+        @for (c of openCases(); track c.id) {
+          <option [value]="c.id">{{ c.name }} ({{ c.state }})</option>
+        }
+      </select>
+    </label>
+    <label class="field">
+      <span class="field-label">From</span>
+      <input type="date" [value]="form().dateFrom" (change)="form.set({ ...form(), dateFrom: $any($event.target).value })" />
+    </label>
+    <label class="field">
+      <span class="field-label">To</span>
+      <input type="date" [value]="form().dateTo" (change)="form.set({ ...form(), dateTo: $any($event.target).value })" />
+    </label>
+  </div>
+
+  <div class="toolbar">
+    <label class="field grow">
+      <span class="field-label">Search terms (optional)</span>
+      <input
+        placeholder="e.g. bonus pool"
+        [value]="form().searchTerms"
+        (input)="form.set({ ...form(), searchTerms: $any($event.target).value })"
+      />
+    </label>
+    <button class="primary" (click)="place()">Place hold</button>
+  </div>
+
+  @if (custodians().length) {
+    <details>
+      <summary>
+        Custodians in scope
+        @if (form().custodians.length) {
+          <span class="badge active">{{ form().custodians.length }} selected</span>
+        }
+      </summary>
+      <div class="check-grid">
+        @for (c of custodians(); track c.id) {
+          <label class="check">
+            <input
+              type="checkbox"
+              [checked]="form().custodians.includes(c.email)"
+              (change)="toggleCustodian(c.email, $any($event.target).checked)"
+            />
+            <span>{{ c.name }} <span class="muted">({{ c.email }})</span></span>
+          </label>
+        }
+      </div>
+    </details>
+  }
+
+  <p class="card-hint">
+    Scope is resolved asynchronously, so a hold over the whole corpus returns
+    immediately (FR-4.3). The message count fills in on its own. Closed cases
+    are read-only and cannot take new holds (FR-2.5).
+  </p>
+</div>
+
+@if (loading()) {
+  <div class="card">
+    <div class="skeleton-list">
+      <span class="skeleton"></span>
+      <span class="skeleton"></span>
+      <span class="skeleton"></span>
+    </div>
+  </div>
+} @else {
+  <div class="card flush">
+    <table>
+      <thead>
+        <tr>
+          <th>Case</th>
+          <th>Status</th>
+          <th>Custodians</th>
+          <th>Terms</th>
+          <th>Messages</th>
+          <th>Placed</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (h of holds(); track h.id) {
+          <tr>
+            <td class="mono">{{ h.caseId.slice(0, 8) }}</td>
+            <td>
+              @if (h.active) {
+                <span class="badge held">active</span>
+              } @else {
+                <span class="badge closed">released</span>
+              }
+            </td>
+            <td>{{ h.custodians.length ? h.custodians.join(', ') : 'all' }}</td>
+            <td class="muted">{{ h.searchTerms || '—' }}</td>
+            <td>
+              @if (h.scopeResolved) {
+                {{ h.messageCount }}
+              } @else if (h.scopeFailureReason) {
+                <span class="badge fail">scope failed</span>
+              } @else {
+                <span class="badge run live">resolving</span>
+              }
+            </td>
+            <td class="muted">{{ h.placedAt | date: 'short' }}</td>
+            <td>
+              <div class="row tight">
+                @if (h.active) {
+                  <button class="sm danger" (click)="release(h)">Release</button>
+                }
+                @if (h.scopeFailureReason) {
+                  <button class="sm" (click)="resolveScope(h)">Retry scope</button>
+                }
+              </div>
+            </td>
+          </tr>
+          @if (h.scopeFailureReason) {
+            <tr class="error-row">
+              <td colspan="7">
+                Scope could not be resolved: {{ h.scopeFailureReason }}. This
+                hold protects nothing until it is resolved.
+              </td>
+            </tr>
+          }
+        } @empty {
+          <tr><td colspan="7" class="empty">No holds.</td></tr>
+        }
+      </tbody>
+    </table>
+  </div>
+}

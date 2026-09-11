@@ -1,0 +1,174 @@
+@if (error()) {
+  <div class="alert error"><div>{{ error() }}</div></div>
+}
+@if (notice()) {
+  <div class="alert success"><div>{{ notice() }}</div></div>
+}
+
+@if (case(); as c) {
+  <div class="card">
+    <div class="page-header" style="margin-bottom: 0.75rem;">
+      <div>
+        <h1 class="page-title">{{ c.name }}</h1>
+        <p class="page-subtitle">{{ c.matterType }} · owner {{ c.owner }}</p>
+      </div>
+      <div class="page-actions">
+        @for (s of nextStates(); track s) {
+          <button class="primary" (click)="transition(s)">Advance → {{ s }}</button>
+        } @empty {
+          <span class="muted small">No further transitions from {{ c.state }}.</span>
+        }
+      </div>
+    </div>
+
+    @if (c.description) {
+      <p>{{ c.description }}</p>
+    }
+
+    <div class="row">
+      <span class="badge" [class]="stateBadgeClass(c.state)">{{ c.state }}</span>
+      <span class="muted small">Created {{ c.createdAt | date: 'medium' }}</span>
+      @if (heldMessages() !== null) {
+        <span class="badge held">{{ heldMessages() }} messages under hold</span>
+      }
+    </div>
+
+    @if (readOnly()) {
+      <p class="card-hint">
+        This case is closed and read-only — no new evidence, holds or exports
+        (FR-2.5).
+      </p>
+    }
+  </div>
+
+  <div class="card">
+    <div class="section-title">
+      <h3>Custodians</h3>
+      <span class="count">{{ caseCustodians().length }}</span>
+    </div>
+    <p class="muted small" style="margin-top: 0;">
+      Employees whose communications are in scope for this case (FR-2.3).
+    </p>
+
+    <div class="chips">
+      @for (cust of caseCustodians(); track cust.id) {
+        <span class="chip">
+          {{ cust.name }} <span class="chip-sub">{{ cust.email }}</span>
+        </span>
+      } @empty {
+        <span class="muted small">No custodians attached yet.</span>
+      }
+    </div>
+
+    @if (!readOnly()) {
+      <div class="toolbar" style="margin-top: 0.85rem;">
+        <label class="field grow">
+          <span class="field-label">Add a custodian</span>
+          <select
+            [value]="custodianToAdd()"
+            (change)="custodianToAdd.set($any($event.target).value)"
+          >
+            <option value="">— choose a custodian —</option>
+            @for (cust of availableCustodians(); track cust.id) {
+              <option [value]="cust.id">{{ cust.name }} ({{ cust.email }})</option>
+            }
+          </select>
+        </label>
+        <button class="primary" (click)="addCustodian()">Add custodian</button>
+      </div>
+    }
+  </div>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <div class="section-title">
+        <h3>Evidence</h3>
+        <span class="count">{{ evidence().length }}</span>
+      </div>
+
+      @if (!readOnly()) {
+        <div class="toolbar">
+          <label class="field grow">
+            <span class="field-label">Message id</span>
+            <input
+              placeholder="paste a message id"
+              [value]="newMessageId()"
+              (input)="newMessageId.set($any($event.target).value)"
+              (keydown.enter)="addEvidence()"
+            />
+          </label>
+          <button class="primary" (click)="addEvidence()">Add</button>
+        </div>
+        <p class="muted small">
+          Tip: add whole result sets from the Search screen (FR-3.6).
+        </p>
+      }
+
+      <table>
+        <thead>
+          <tr><th>Message</th><th>Source</th><th>Added</th><th></th></tr>
+        </thead>
+        <tbody>
+          @for (e of evidence(); track e.id) {
+            <tr>
+              <td class="mono">{{ e.messageId }}</td>
+              <td class="muted">{{ e.source }}</td>
+              <td class="muted">{{ e.addedAt | date: 'short' }}</td>
+              <td>
+                @if (!readOnly()) {
+                  <button class="sm danger" (click)="removeEvidence(e)">Remove</button>
+                }
+              </td>
+            </tr>
+          } @empty {
+            <tr><td colspan="4" class="empty">No evidence yet.</td></tr>
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="section-title">
+        <h3>Holds</h3>
+        <span class="count">{{ holds().length }}</span>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Status</th><th>Custodians</th><th>Messages</th><th>Placed</th></tr>
+        </thead>
+        <tbody>
+          @for (h of holds(); track h.id) {
+            <tr>
+              <td>
+                @if (h.active) {
+                  <span class="badge held">active</span>
+                } @else {
+                  <span class="badge closed">released</span>
+                }
+              </td>
+              <td>{{ h.custodians.length ? h.custodians.join(', ') : 'all' }}</td>
+              <td>
+                @if (h.scopeResolved) {
+                  {{ h.messageCount }}
+                } @else {
+                  <span class="badge run live">resolving</span>
+                }
+              </td>
+              <td class="muted">{{ h.placedAt | date: 'short' }}</td>
+            </tr>
+          } @empty {
+            <tr><td colspan="4" class="empty">No holds on this case.</td></tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </div>
+} @else {
+  <div class="card">
+    <div class="skeleton-list">
+      <span class="skeleton tall" style="width: 40%;"></span>
+      <span class="skeleton"></span>
+      <span class="skeleton"></span>
+    </div>
+  </div>
+}
