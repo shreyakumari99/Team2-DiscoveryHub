@@ -1,63 +1,44 @@
-# ---------- Maven ----------
-target/
-pom.xml.tag
-pom.xml.releaseBackup
-pom.xml.versionsBackup
-pom.xml.next
-release.properties
-dependency-reduced-pom.xml
-buildNumber.properties
-.mvn/timing.properties
-.mvn/wrapper/maven-wrapper.jar
+# See https://docs.github.com/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
 
-# ---------- Java ----------
-*.class
-*.jar
-*.war
-*.ear
-*.nar
-hs_err_pid*
-replay_pid*
+# Compiled output
+/dist
+/tmp
+/out-tsc
+/bazel-out
 
-# ---------- IDE ----------
+# Node
+/node_modules
+npm-debug.log
+yarn-error.log
+
+# IDEs and editors
 .idea/
-.devin/
-*.iml
-*.ipr
-*.iws
-.vscode/
-.settings/
 .project
 .classpath
-.factorypath
-*.swp
-*.swo
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
 
-# ---------- Node / Angular frontend ----------
-frontend/node/
-frontend/node_modules/
-frontend/dist/
-frontend/.angular/cache/
-frontend/coverage/
-frontend/.nyc_output/
-npm-debug.log*
-yarn-error.log*
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/mcp.json
+.history/*
 
-# ---------- OS ----------
+# Miscellaneous
+/.angular/cache
+.sass-cache/
+/connect.lock
+/coverage
+/libpeerconnection.log
+testem.log
+/typings
+__screenshots__/
+
+# System files
 .DS_Store
 Thumbs.db
-
-# ---------- Docker / runtime data ----------
-data/
-volumes/
-*.log
-
-# ---------- Env ----------
-.env
-.env.local
-*.local
-
-# ---------- Misc ----------
-*.tmp
-*.bak
-.DS_Store
