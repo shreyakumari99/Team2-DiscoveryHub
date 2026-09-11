@@ -1,0 +1,31 @@
+<header class="app-header">
+  <div class="brand-wrap">
+    <span class="brand-mark" aria-hidden="true">DH</span>
+    <a class="brand" routerLink="/dashboard">DiscoveryHub</a>
+  </div>
+
+  <nav class="app-nav" aria-label="Main navigation">
+    @for (item of nav; track item.path) {
+      <a
+        [routerLink]="item.path"
+        routerLinkActive="active"
+        [routerLinkActiveOptions]="{ exact: false }"
+      >
+        {{ item.label }}
+      </a>
+    }
+  </nav>
+
+  <label class="app-actor" title="Recorded as the actor on every audit entry (FR-7.2)">
+    <span class="app-actor-label">Investigator</span>
+    <input
+      [value]="actor()"
+      (change)="setActor($any($event.target).value)"
+      aria-label="Current investigator"
+    />
+  </label>
+</header>
+
+<main class="app-main">
+  <router-outlet />
+</main>
