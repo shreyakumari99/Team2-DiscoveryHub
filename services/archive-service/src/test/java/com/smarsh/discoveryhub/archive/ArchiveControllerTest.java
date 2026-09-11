@@ -97,6 +97,29 @@ class ArchiveControllerTest {
                 .andExpect(status().isNotFound());
     }
 
+    /**
+     * Ingestion only ever hands back the source id, so a caller that has just
+     * submitted a message can name it no other way until this lookup resolves.
+     */
+    @Test
+    void findsMessageByItsSourceId() throws Exception {
+        when(repository.findBySourceMessageId("src-m1")).thenReturn(Optional.of(message("m1")));
+
+        mockMvc.perform(get("/api/v1/messages/by-source/src-m1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("m1"))
+                .andExpect(jsonPath("$.sourceMessageId").value("src-m1"));
+    }
+
+    /** Not archived yet, or archived and since disposed of — both are 404. */
+    @Test
+    void unknownSourceIdReturns404() throws Exception {
+        when(repository.findBySourceMessageId(anyString())).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/v1/messages/by-source/src-nope"))
+                .andExpect(status().isNotFound());
+    }
+
     /** FR-6.3: export fetches thousands of messages, so bulk retrieval exists. */
     @Test
     void fetchesMessagesInBulk() throws Exception {
