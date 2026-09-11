@@ -206,6 +206,14 @@ docker-compose.yml           # full stack, single command
   starts — `docker compose up` works first time on a clean machine. (The old
   manual fix was `docker run --rm -v discoveryhub_kafka-data:/data alpine
   chown -R 1000:1000 /data`.)
+- **Work that must outlive a screen cannot live in a route component.** Every
+  route is a lazy `loadComponent`, so navigating away destroys the component
+  and `takeUntilDestroyed(this.destroyRef)` cancels its timers and polls
+  silently. The demo disposition's countdown hit this: leaving the retention
+  tab cancelled the deletion. It now lives in the root `DemoDispositionService`
+  (`frontend/src/app/core/demo-disposition.ts`), which also mirrors the
+  outstanding demo to localStorage and is injected by `App` so a reload on any
+  screen resumes it.
 - **ingestion-service and archive-service both serve `/api/v1/messages`**, so
   the browser cannot reach both by prefix. The frontend calls ingestion at
   `/api/v1/ingestion`; `proxy.conf.mjs` (`pathRewrite`) and nginx (a
@@ -228,3 +236,4 @@ docker-compose.yml           # full stack, single command
   `audit-events` topic; no service writes to `audit_db` directly.
 - Controllers use standalone-style tests where stubbing return values matters;
   otherwise `@WebMvcTest`/`@SpringBootTest` with `@MockBean`.
+ 
