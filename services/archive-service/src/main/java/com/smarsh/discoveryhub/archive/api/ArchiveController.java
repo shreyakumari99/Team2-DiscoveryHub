@@ -31,6 +31,7 @@ import java.util.Map;
  *
  * <pre>
  *   GET    /api/v1/messages/{id}                     one message
+ *   GET    /api/v1/messages/by-source/{sourceId}     one message, by its producer's id
  *   GET    /api/v1/messages?ids=a,b,c                bulk fetch (used by export)
  *   GET    /api/v1/messages/{id}/attachments/{n}     raw attachment bytes (FR-6.3)
  *   GET    /api/v1/messages/stats                    corpus + hold counts (FR-8.2)
@@ -69,6 +70,22 @@ public class ArchiveController {
     public ArchivedMessage getMessage(@PathVariable String id) {
         return repository.findById(id)
                 .orElseThrow(() -> new MessageNotFoundException(id));
+    }
+
+    /**
+     * Look a message up by the source id its producer gave it, rather than by
+     * the archive id assigned here.
+     *
+     * <p>Ingestion is asynchronous and answers 202 with only the source id, so
+     * a caller that has just submitted a message has no way to name it
+     * afterwards. This is that mapping, and a 404 means "not archived yet, or
+     * no longer archived" — which is exactly what the demo disposition polls
+     * for, before and after the deletion.
+     */
+    @GetMapping("/by-source/{sourceMessageId}")
+    public ArchivedMessage getMessageBySource(@PathVariable String sourceMessageId) {
+        return repository.findBySourceMessageId(sourceMessageId)
+                .orElseThrow(() -> new MessageNotFoundException(sourceMessageId));
     }
 
     /**
@@ -143,9 +160,9 @@ public class ArchiveController {
     public Map<String, Long> heldCount(@RequestBody HeldCountRequest request) {
         long count = request.holdIds() == null ? 0
                 : request.holdIds().stream()
-                .flatMap(holdId -> holdLedger.messagesCoveredBy(holdId).stream())
-                .distinct()
-                .count();
+                        .flatMap(holdId -> holdLedger.messagesCoveredBy(holdId).stream())
+                        .distinct()
+                        .count();
         return Map.of("heldMessages", count);
     }
 
