@@ -1,0 +1,108 @@
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Cases</h1>
+    <p class="page-subtitle">
+      Every matter under investigation, and the lifecycle state it is in
+      (FR-2).
+    </p>
+  </div>
+  <div class="page-actions">
+    <button (click)="refresh()">Refresh</button>
+  </div>
+</div>
+
+@if (error()) {
+  <div class="alert error"><div>{{ error() }}</div></div>
+}
+
+<div class="card">
+  <div class="section-title">
+    <h3>Create a case</h3>
+  </div>
+
+  <div class="toolbar">
+    <label class="field grow">
+      <span class="field-label">Name</span>
+      <input
+        placeholder="e.g. Q3 trading desk review"
+        [value]="form().name"
+        (input)="form.set({ ...form(), name: $any($event.target).value })"
+      />
+    </label>
+    <label class="field">
+      <span class="field-label">Matter type</span>
+      <select
+        [value]="form().matterType"
+        (change)="form.set({ ...form(), matterType: $any($event.target).value })"
+      >
+        <option value="INVESTIGATION">Investigation</option>
+        <option value="LITIGATION">Litigation</option>
+        <option value="REGULATORY_INQUIRY">Regulatory Inquiry</option>
+      </select>
+    </label>
+    <label class="field">
+      <span class="field-label">Owner</span>
+      <input
+        placeholder="owner@smarsh.com"
+        [value]="form().owner"
+        (input)="form.set({ ...form(), owner: $any($event.target).value })"
+      />
+    </label>
+  </div>
+
+  <div class="toolbar">
+    <label class="field grow">
+      <span class="field-label">Description</span>
+      <input
+        placeholder="What is this matter about?"
+        [value]="form().description"
+        (input)="form.set({ ...form(), description: $any($event.target).value })"
+      />
+    </label>
+    <button class="primary" (click)="create()">Create case</button>
+  </div>
+</div>
+
+@if (loading()) {
+  <div class="card">
+    <div class="skeleton-list">
+      <span class="skeleton"></span>
+      <span class="skeleton"></span>
+      <span class="skeleton"></span>
+      <span class="skeleton"></span>
+    </div>
+  </div>
+} @else {
+  <div class="card flush">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>State</th>
+          <th>Owner</th>
+          <th>Created</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (c of cases(); track c.id) {
+          <tr>
+            <td><strong>{{ c.name }}</strong></td>
+            <td class="muted">{{ c.matterType }}</td>
+            <td>
+              <span class="badge" [class]="stateBadgeClass(c.state)">{{ c.state }}</span>
+            </td>
+            <td>{{ c.owner }}</td>
+            <td class="muted">{{ c.createdAt | date: 'short' }}</td>
+            <td><a [routerLink]="['/cases', c.id]">Open →</a></td>
+          </tr>
+        } @empty {
+          <tr>
+            <td colspan="6" class="empty">No cases yet — create one above.</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+}

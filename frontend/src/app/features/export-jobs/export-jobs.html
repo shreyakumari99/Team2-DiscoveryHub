@@ -1,0 +1,160 @@
+<div class="page-header">
+  <div>
+    <h1 class="page-title">
+      Export Jobs
+      @if (hasActiveJobs()) {
+        <span class="badge run live">live — updating</span>
+      }
+    </h1>
+    <p class="page-subtitle">
+      Defensible export packages with a checksum manifest, so a produced set
+      can be proved unaltered (FR-6).
+    </p>
+  </div>
+  <div class="page-actions">
+    <input
+      placeholder="filter by case id"
+      [value]="filterCaseId()"
+      (input)="filterCaseId.set($any($event.target).value)"
+      (keydown.enter)="refresh()"
+    />
+    <button (click)="refresh()">Refresh</button>
+  </div>
+</div>
+
+@if (error()) {
+  <div class="alert error"><div>{{ error() }}</div></div>
+}
+@if (notice()) {
+  <div class="alert success"><div>{{ notice() }}</div></div>
+}
+
+<div class="card">
+  <div class="section-title">
+    <h3>Request an export</h3>
+  </div>
+
+  <div class="toolbar">
+    <label class="field grow">
+      <span class="field-label">Case</span>
+      <select
+        [value]="form().caseId"
+        (change)="form.set({ ...form(), caseId: $any($event.target).value, scope: 'evidence' })"
+      >
+        <option value="">— choose a case —</option>
+        @for (c of openCases(); track c.id) {
+          <option [value]="c.id">{{ c.name }} ({{ c.state }})</option>
+        }
+      </select>
+    </label>
+    <label class="field grow">
+      <span class="field-label">Scope</span>
+      <select
+        [value]="form().scope"
+        (change)="form.set({ ...form(), scope: $any($event.target).value })"
+      >
+        <option value="evidence">Case evidence items</option>
+        @for (h of holdsForSelectedCase(); track h.id) {
+          <option [value]="'hold:' + h.id">
+            Hold scope — {{ h.id.slice(0, 8) }} ({{ h.messageCount }} messages)
+          </option>
+        }
+      </select>
+    </label>
+    <button class="primary" (click)="request()">Request export</button>
+  </div>
+
+  <p class="card-hint">
+    Runs as a background job — you get a job id immediately (FR-6.2) and the
+    status below updates itself. Closed cases are read-only and cannot be
+    exported (FR-2.5).
+  </p>
+</div>
+
+@if (loading()) {
+  <div class="card">
+    <div class="skeleton-list">
+      <span class="skeleton"></span>
+      <span class="skeleton"></span>
+      <span class="skeleton"></span>
+    </div>
+  </div>
+} @else {
+  <div class="card flush">
+    <table>
+      <thead>
+        <tr>
+          <th>Job</th>
+          <th>Case</th>
+          <th>Scope</th>
+          <th>Status</th>
+          <th>Messages</th>
+          <th>Files</th>
+          <th>Content checksum</th>
+          <th>Requested</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (j of jobs(); track j.id) {
+          <tr>
+            <td class="mono">{{ j.id.slice(0, 8) }}</td>
+            <td class="mono">{{ j.caseId.slice(0, 8) }}</td>
+            <td class="muted">{{ j.scope }}</td>
+            <td><span class="badge" [class]="statusBadge(j.status)">{{ j.status }}</span></td>
+            <td>{{ j.messageCount }}</td>
+            <td>{{ j.itemCount }}</td>
+            <td class="mono muted" [title]="j.contentChecksum || ''">
+              {{ j.contentChecksum ? j.contentChecksum.slice(0, 12) + '…' : '—' }}
+            </td>
+            <td class="muted">{{ j.requestedAt | date: 'short' }}</td>
+            <td>
+              <div class="row tight">
+                @if (j.status === 'COMPLETED') {
+                  <button class="sm primary" (click)="download(j)">Download</button>
+                  <button class="sm" (click)="verify(j)">Verify</button>
+                } @else if (j.status === 'FAILED') {
+                  <button class="sm" (click)="retry(j)">Retry</button>
+                }
+              </div>
+            </td>
+          </tr>
+
+          @if (j.failureReason) {
+            <tr class="error-row">
+              <td colspan="9">Failed: {{ j.failureReason }}</td>
+            </tr>
+          }
+
+          @if (verificationFor(j); as v) {
+            <tr class="detail-row">
+              <td colspan="9">
+                @if (v.verified) {
+                  <div class="row">
+                    <span class="badge ok">verified</span>
+                    <span class="muted">
+                      {{ v.itemsChecked }} items re-checked against the
+                      manifest; content and package checksums both match
+                      (FR-6.5).
+                    </span>
+                  </div>
+                } @else {
+                  <div class="stack">
+                    <span class="row"><span class="badge fail">tampering detected</span></span>
+                    <ul style="margin: 0;">
+                      @for (p of v.problems; track p) {
+                        <li style="color: var(--dh-danger);">{{ p }}</li>
+                      }
+                    </ul>
+                  </div>
+                }
+              </td>
+            </tr>
+          }
+        } @empty {
+          <tr><td colspan="9" class="empty">No export jobs yet.</td></tr>
+        }
+      </tbody>
+    </table>
+  </div>
+}

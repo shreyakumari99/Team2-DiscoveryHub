@@ -1,0 +1,276 @@
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Retention &amp; Disposition</h1>
+    <p class="page-subtitle">
+      Configurable retention per communication type, and the scheduled process
+      that deletes what has expired — except anything under legal hold (FR-5,
+      FR-4.6).
+    </p>
+  </div>
+</div>
+
+@if (error()) {
+  <div class="alert error"><div>{{ error() }}</div></div>
+}
+@if (notice()) {
+  <div class="alert success"><div>{{ notice() }}</div></div>
+}
+@if (pending()) {
+  <div class="alert info"><div>{{ pending() }}</div></div>
+}
+
+<div class="grid grid-2">
+  <div class="card">
+    <div class="section-title">
+      <h3>Retention policies</h3>
+    </div>
+
+    <table>
+      <thead>
+        <tr><th>Type</th><th>Retention</th></tr>
+      </thead>
+      <tbody>
+        @for (p of policies(); track p.type) {
+          <tr>
+            <td><span class="badge">{{ p.type }}</span></td>
+            <td>{{ p.retentionMinutes }} minutes</td>
+          </tr>
+        } @empty {
+          <tr>
+            <td colspan="2" class="empty">
+              No policies configured — nothing will be disposed of.
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+
+    <div class="toolbar" style="margin-top: 0.85rem;">
+      <label class="field">
+        <span class="field-label">Type</span>
+        <select
+          [value]="policyForm().type"
+          (change)="policyForm.set({ ...policyForm(), type: $any($event.target).value })"
+        >
+          <option value="EMAIL">Email</option>
+          <option value="CHAT">Chat</option>
+        </select>
+      </label>
+      <label class="field">
+        <span class="field-label">Retention (minutes)</span>
+        <input
+          type="number"
+          min="0"
+          style="width: 8rem;"
+          [value]="policyForm().retentionMinutes"
+          (input)="policyForm.set({ ...policyForm(), retentionMinutes: +$any($event.target).value })"
+        />
+      </label>
+      <button class="primary" (click)="savePolicy()">Save policy</button>
+    </div>
+
+    <p class="card-hint">
+      Stored in minutes so the demo can observe disposition inside the demo
+      window (FR-5.1). Production values would be 7 years for email, 3 for
+      chat — 3,679,200 and 1,576,800 minutes.
+    </p>
+  </div>
+
+  <div class="card">
+    <div class="section-title">
+      <h3>Run a disposition now</h3>
+    </div>
+    <p class="muted" style="margin-top: 0;">
+      Deletes messages past retention. Held messages are refused by
+      archive-service with 409 and recorded as preserved rather than deleted.
+    </p>
+    <div class="row">
+      <button class="primary" (click)="runDisposition()" [disabled]="running()">
+        {{ running() ? 'Running…' : 'Run disposition' }}
+      </button>
+      @if (pending()) {
+        <span class="badge run live">waiting for the run to land</span>
+      }
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="section-title">
+    <h3>Demo disposition — one message</h3>
+  </div>
+  <p class="muted" style="margin-top: 0;">
+    A real run disposes of everything past retention, which on a demo-length
+    policy is the whole corpus. This generates a single throwaway message,
+    waits out the retention period configured for its type, and then deletes
+    that one message — through the same ingestion, archive and delete path, so
+    a legal hold covering it still blocks the deletion with 409.
+  </p>
+  <p class="card-hint">
+    The countdown keeps running while you are on other screens, and across a
+    page reload, so you can start it here and watch the dashboard's message
+    count drop when it fires.
+  </p>
+
+  <div class="toolbar">
+    <label class="field">
+      <span class="field-label">Type</span>
+      <select
+        [value]="demoType()"
+        (change)="demoType.set($any($event.target).value)"
+      >
+        <option value="EMAIL">Email</option>
+        <option value="CHAT">Chat</option>
+      </select>
+    </label>
+    <button
+      class="primary"
+      (click)="runDemoDisposition()"
+      [disabled]="demoRunning()"
+    >
+      Run demo disposition
+    </button>
+    @if (demo()) {
+      <button class="sm" (click)="cancelDemo()">Clear</button>
+    }
+  </div>
+
+  @if (demo(); as d) {
+    <table style="margin-top: 0.85rem;">
+      <thead>
+        <tr>
+          <th>Stage</th>
+          <th>Message</th>
+          <th>Type</th>
+          <th>Retention</th>
+          <th>Deletes in</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <span class="badge" [class]="demoStageBadge(d.stage)">
+              {{ demoStageLabel(d.stage) }}
+            </span>
+          </td>
+          <td class="mono">{{ d.messageId ?? d.sourceMessageId }}</td>
+          <td class="muted">{{ d.type }}</td>
+          <td class="muted">{{ d.retentionMinutes }} min</td>
+          <td>
+            @if (d.stage === 'WAITING') {
+              <span class="mono">{{ demoCountdown() }}</span>
+            } @else {
+              <span class="muted">—</span>
+            }
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    @if (d.detail) {
+      <p class="muted small">{{ d.detail }}</p>
+    }
+  }
+</div>
+
+@if (loading()) {
+  <div class="card">
+    <div class="skeleton-list">
+      <span class="skeleton"></span>
+      <span class="skeleton"></span>
+      <span class="skeleton"></span>
+    </div>
+  </div>
+} @else {
+  <div class="card">
+    <div class="section-title">
+      <h3>Disposition runs</h3>
+      <span class="count">{{ runs().length }}</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Started</th>
+          <th>Trigger</th>
+          <th>Deleted</th>
+          <th>Preserved by hold</th>
+          <th>Already gone</th>
+          <th>Errors</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (r of runs(); track r.id) {
+          <tr>
+            <td class="muted">{{ r.startedAt | date: 'medium' }}</td>
+            <td><span class="badge">{{ r.trigger }}</span></td>
+            <td>{{ r.deletedCount }}</td>
+            <td>
+              @if (r.skippedHeldCount > 0) {
+                <span class="badge held">{{ r.skippedHeldCount }}</span>
+              } @else {
+                <span class="muted">0</span>
+              }
+            </td>
+            <td class="muted">{{ r.notFoundCount }}</td>
+            <td>
+              @if (r.errorCount > 0) {
+                <span class="badge fail">{{ r.errorCount }}</span>
+              } @else {
+                <span class="muted">0</span>
+              }
+            </td>
+            <td>
+              <button class="sm" (click)="showItems(r)">
+                {{ selectedRunId() === r.id ? 'Hide' : 'Per-message record' }}
+              </button>
+            </td>
+          </tr>
+        } @empty {
+          <tr><td colspan="7" class="empty">No disposition runs yet.</td></tr>
+        }
+      </tbody>
+    </table>
+  </div>
+
+  @if (selectedRunId()) {
+    <div class="card">
+      <div class="section-title">
+        <h3>Per-message record (FR-5.3)</h3>
+      </div>
+
+      <div class="row between">
+        <div class="segmented">
+          <button [class.active]="itemFilter() === ''" (click)="filterItems('')">All</button>
+          <button [class.active]="itemFilter() === 'DELETED'" (click)="filterItems('DELETED')">Deleted</button>
+          <button [class.active]="itemFilter() === 'SKIPPED_HELD'" (click)="filterItems('SKIPPED_HELD')">Preserved by hold</button>
+          <button [class.active]="itemFilter() === 'ERROR'" (click)="filterItems('ERROR')">Errors</button>
+        </div>
+        <span class="muted small">{{ runItems().length }} shown</span>
+      </div>
+
+      <p class="muted small">
+        The "preserved by hold" list is the proof that deletion of a held
+        message is blocked — message by message, not as a summary count.
+      </p>
+
+      <table>
+        <thead>
+          <tr><th>Message</th><th>Type</th><th>Outcome</th><th>Cut-off</th><th>Decided</th></tr>
+        </thead>
+        <tbody>
+          @for (i of runItems(); track i.id) {
+            <tr>
+              <td class="mono">{{ i.messageId }}</td>
+              <td class="muted">{{ i.messageType }}</td>
+              <td><span class="badge" [class]="outcomeBadge(i.outcome)">{{ i.outcome }}</span></td>
+              <td class="muted">{{ i.retentionCutoff | date: 'short' }}</td>
+              <td class="muted">{{ i.decidedAt | date: 'short' }}</td>
+            </tr>
+          } @empty {
+            <tr><td colspan="5" class="empty">No messages match this filter.</td></tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+}

@@ -1,0 +1,149 @@
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Audit Trail</h1>
+    <p class="page-subtitle">
+      Append-only chain of custody (FR-7). Entries can never be updated or
+      deleted — there is no write endpoint, and the database rejects UPDATE,
+      DELETE and TRUNCATE on the table outright.
+    </p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="toolbar">
+    <label class="field grow">
+      <span class="field-label">Case id</span>
+      <input
+        placeholder="blank = all cases"
+        [value]="filterCaseId()"
+        (input)="filterCaseId.set($any($event.target).value)"
+        (keydown.enter)="applyFilters()"
+      />
+    </label>
+    <label class="field">
+      <span class="field-label">Action</span>
+      <select [value]="filterAction()" (change)="filterAction.set($any($event.target).value)">
+        <option value="">All actions</option>
+        @for (a of actions(); track a) {
+          <option [value]="a">{{ a }}</option>
+        }
+      </select>
+    </label>
+    <label class="field">
+      <span class="field-label">Actor</span>
+      <input
+        placeholder="who did it"
+        [value]="filterActor()"
+        (input)="filterActor.set($any($event.target).value)"
+        (keydown.enter)="applyFilters()"
+      />
+    </label>
+    <label class="field">
+      <span class="field-label">Entity</span>
+      <select [value]="filterEntityType()" (change)="filterEntityType.set($any($event.target).value)">
+        <option value="">All entities</option>
+        <option value="CASE">Case</option>
+        <option value="CUSTODIAN">Custodian</option>
+        <option value="EVIDENCE">Evidence</option>
+        <option value="HOLD">Hold</option>
+        <option value="MESSAGE">Message</option>
+        <option value="EXPORT">Export</option>
+        <option value="SEARCH">Search</option>
+        <option value="DISPOSITION_RUN">Disposition run</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="toolbar">
+    <label class="field">
+      <span class="field-label">From</span>
+      <input type="date" [value]="dateFrom()" (change)="dateFrom.set($any($event.target).value)" />
+    </label>
+    <label class="field">
+      <span class="field-label">To</span>
+      <input type="date" [value]="dateTo()" (change)="dateTo.set($any($event.target).value)" />
+    </label>
+    <button class="primary" (click)="applyFilters()">Apply filters</button>
+    @if (hasFilters()) {
+      <button class="ghost" (click)="clearFilters()">Clear</button>
+    }
+  </div>
+</div>
+
+@if (error()) {
+  <div class="alert error"><div>{{ error() }}</div></div>
+}
+
+@if (loading()) {
+  <div class="card">
+    <div class="skeleton-list">
+      <span class="skeleton"></span>
+      <span class="skeleton"></span>
+      <span class="skeleton"></span>
+      <span class="skeleton"></span>
+      <span class="skeleton"></span>
+    </div>
+  </div>
+} @else {
+  <div class="result-summary">
+    <strong>{{ totalEntries() }} entries</strong>
+    <span class="muted">page {{ page() + 1 }} of {{ totalPages() || 1 }}</span>
+  </div>
+
+  <div class="card flush">
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Service</th>
+          <th>Action</th>
+          <th>Actor</th>
+          <th>Entity</th>
+          <th>Case</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (a of entries(); track a.eventId) {
+          <tr>
+            <td class="muted">{{ a.timestamp | date: 'medium' }}</td>
+            <td class="muted">{{ a.service }}</td>
+            <td><strong>{{ a.action }}</strong></td>
+            <td>{{ a.actor }}</td>
+            <td class="mono">{{ a.entityType }}:{{ a.entityId?.slice(0, 8) }}</td>
+            <td class="mono muted">{{ a.caseId?.slice(0, 8) || '—' }}</td>
+            <td>
+              @if (hasDetail(a)) {
+                <button class="sm" (click)="toggleDetail(a)">
+                  {{ isExpanded(a) ? 'Hide' : 'Detail' }}
+                </button>
+              }
+            </td>
+          </tr>
+          @if (isExpanded(a)) {
+            <tr class="detail-row">
+              <td colspan="7">
+                <div class="stack">
+                  @if (a.beforeJson) {
+                    <div><span class="field-label">before</span> <code>{{ a.beforeJson }}</code></div>
+                  }
+                  @if (a.afterJson) {
+                    <div><span class="field-label">after</span> <code>{{ a.afterJson }}</code></div>
+                  }
+                </div>
+              </td>
+            </tr>
+          }
+        } @empty {
+          <tr><td colspan="7" class="empty">No audit entries match these filters.</td></tr>
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pagination">
+    <button (click)="prevPage()" [disabled]="page() === 0">← Prev</button>
+    <span class="muted small">page {{ page() + 1 }} of {{ totalPages() || 1 }}</span>
+    <button (click)="nextPage()" [disabled]="page() + 1 >= (totalPages() || 1)">Next →</button>
+  </div>
+}

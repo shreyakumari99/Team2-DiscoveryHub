@@ -1,0 +1,88 @@
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Dashboard</h1>
+    <p class="page-subtitle">
+      A live overview of the corpus, open matters and the work in flight
+      (FR-8.2).
+    </p>
+  </div>
+  @if (loading()) {
+    <span class="badge run live">loading counts</span>
+  }
+</div>
+
+@if (hasDegradedCounts()) {
+  <div class="alert warn">
+    <div>
+      <strong>Some counts are unavailable</strong>
+      ({{ unavailable().join(', ') }}). The rest of the dashboard is still
+      accurate — services degrade independently (NFR-2).
+    </div>
+  </div>
+}
+
+<div class="grid grid-auto">
+  <div class="card stat">
+    <span class="value">
+      @if (loading() && totalMessages() === null) {
+        <span class="skeleton tall" style="width: 4.5rem;"></span>
+      } @else {
+        {{ totalMessages() === null ? '—' : totalMessages() }}
+      }
+    </span>
+    <span class="label">Total messages</span>
+  </div>
+  <div class="card stat">
+    <span class="value">
+      @if (loading() && activeCases() === null) {
+        <span class="skeleton tall" style="width: 3rem;"></span>
+      } @else {
+        {{ activeCases() === null ? '—' : activeCases() }}
+      }
+    </span>
+    <span class="label">Active cases</span>
+  </div>
+  <div class="card stat accent-warn">
+    <span class="value">
+      @if (loading() && activeHolds() === null) {
+        <span class="skeleton tall" style="width: 3rem;"></span>
+      } @else {
+        {{ activeHolds() === null ? '—' : activeHolds() }}
+      }
+    </span>
+    <span class="label">Active holds</span>
+  </div>
+  <div class="card stat accent-success">
+    <span class="value">
+      @if (loading() && exportsCompleted() === null) {
+        <span class="skeleton tall" style="width: 3rem;"></span>
+      } @else {
+        {{ exportsCompleted() === null ? '—' : exportsCompleted() }}
+      }
+    </span>
+    <span class="label">Exports completed</span>
+  </div>
+  <div class="card stat accent-danger">
+    <span class="value">
+      @if (loading() && heldMessages() === null) {
+        <span class="skeleton tall" style="width: 4rem;"></span>
+      } @else {
+        {{ heldMessages() === null ? '—' : heldMessages() }}
+      }
+    </span>
+    <span class="label">Messages under legal hold</span>
+  </div>
+</div>
+
+<div class="card">
+  <div class="section-title">
+    <h3>Next steps for the demo</h3>
+  </div>
+  <ol class="steps">
+    <li>Run the data-generator to load the 10,000+ corpus.</li>
+    <li><a routerLink="/search">Search</a> for "bonus pool" and add hits to a case.</li>
+    <li><a routerLink="/cases">Create a case</a>, place a hold, then prove deletion is blocked.</li>
+    <li><a routerLink="/exports">Request an export</a> and verify the checksum manifest.</li>
+    <li><a routerLink="/audit">Review the audit trail</a> — every action above is recorded.</li>
+  </ol>
+</div>
