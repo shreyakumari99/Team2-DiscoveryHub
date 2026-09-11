@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: archive-service
+  labels: { app: discoveryhub, service: archive-service }
+spec:
+  replicas: 1
+  selector: { matchLabels: { service: archive-service } }
+  template:
+    metadata: { labels: { service: archive-service } }
+    spec:
+      containers:
+        - name: archive-service
+          image: discoveryhub/archive-service:1.0.0-SNAPSHOT
+          ports: [{ containerPort: 8082 }]
+          env:
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: kafka.bootstrap-servers } }
+            - name: SPRING_DATA_MONGODB_URI
+              valueFrom: { secretKeyRef: { name: discoveryhub-secrets, key: mongo.uri } }
+            # S3 credentials come from the AWS SDK's default provider chain,
+            # which reads these variables. On EKS, remove both and attach an
+            # IAM role to the service account instead (IRSA).
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: { secretKeyRef: { name: discoveryhub-secrets, key: aws.access-key-id } }
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: discoveryhub-secrets, key: aws.secret-access-key } }
+            - name: AWS_REGION
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: aws.region } }
+            - name: AWS_S3_ATTACHMENTS_BUCKET
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: aws.s3.attachments-bucket } }
+            - name: AWS_S3_ENDPOINT
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: aws.s3.endpoint } }
+            - name: AWS_S3_PATH_STYLE
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: aws.s3.path-style } }
+            - name: AWS_S3_AUTO_CREATE_BUCKETS
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: aws.s3.auto-create-buckets } }
+            - name: SERVER_PORT
+              value: "8082"
+          readinessProbe:
+            httpGet: { path: /actuator/health, port: 8082 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: archive-service
+spec:
+  selector: { service: archive-service }
+  ports: [{ port: 8082, targetPort: 8082 }]

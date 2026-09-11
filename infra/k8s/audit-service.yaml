@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit-service
+  labels: { app: discoveryhub, service: audit-service }
+spec:
+  replicas: 1
+  selector: { matchLabels: { service: audit-service } }
+  template:
+    metadata: { labels: { service: audit-service } }
+    spec:
+      containers:
+        - name: audit-service
+          image: discoveryhub/audit-service:1.0.0-SNAPSHOT
+          ports: [{ containerPort: 8087 }]
+          env:
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: kafka.bootstrap-servers } }
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://postgres:5432/audit_db
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom: { secretKeyRef: { name: discoveryhub-secrets, key: postgres.username } }
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom: { secretKeyRef: { name: discoveryhub-secrets, key: postgres.password } }
+            - name: SERVER_PORT
+              value: "8087"
+          readinessProbe:
+            httpGet: { path: /actuator/health, port: 8087 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audit-service
+spec:
+  selector: { service: audit-service }
+  ports: [{ port: 8087, targetPort: 8087 }]

@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hold-retention-service
+  labels: { app: discoveryhub, service: hold-retention-service }
+spec:
+  replicas: 1
+  selector: { matchLabels: { service: hold-retention-service } }
+  template:
+    metadata: { labels: { service: hold-retention-service } }
+    spec:
+      containers:
+        - name: hold-retention-service
+          image: discoveryhub/hold-retention-service:1.0.0-SNAPSHOT
+          ports: [{ containerPort: 8085 }]
+          env:
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: kafka.bootstrap-servers } }
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://postgres:5432/hold_db
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom: { secretKeyRef: { name: discoveryhub-secrets, key: postgres.username } }
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom: { secretKeyRef: { name: discoveryhub-secrets, key: postgres.password } }
+            - name: SEARCH_SERVICE_URL
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: search-service.url } }
+            - name: ARCHIVE_SERVICE_URL
+              valueFrom: { configMapKeyRef: { name: discoveryhub-config, key: archive-service.url } }
+            - name: SERVER_PORT
+              value: "8085"
+          readinessProbe:
+            httpGet: { path: /actuator/health, port: 8085 }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hold-retention-service
+spec:
+  selector: { service: hold-retention-service }
+  ports: [{ port: 8085, targetPort: 8085 }]

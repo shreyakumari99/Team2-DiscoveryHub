@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  labels: { app: discoveryhub, service: frontend }
+spec:
+  replicas: 1
+  selector: { matchLabels: { service: frontend } }
+  template:
+    metadata: { labels: { service: frontend } }
+    spec:
+      containers:
+        - name: frontend
+          image: discoveryhub/frontend:1.0.0-SNAPSHOT
+          ports: [{ containerPort: 80 }]
+          readinessProbe:
+            httpGet: { path: /, port: 80 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+spec:
+  type: LoadBalancer
+  selector: { service: frontend }
+  ports: [{ port: 80, targetPort: 80 }]
