@@ -23,7 +23,7 @@
         <resilience4j.version>2.2.0</resilience4j.version>
         <aws-sdk.version>2.28.16</aws-sdk.version>
         <byte-buddy.version>1.17.0</byte-buddy.version>
-        <jacoco.version>0.8.12</jacoco.version>
+        <jacoco.version>0.8.15</jacoco.version>
     </properties>
 
     <dependencyManagement>
