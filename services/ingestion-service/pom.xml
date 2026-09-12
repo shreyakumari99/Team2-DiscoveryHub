@@ -15,7 +15,7 @@
         <java.version>21</java.version>
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <jacoco.version>0.8.12</jacoco.version>
+        <jacoco.version>0.8.15</jacoco.version>
         <spring-boot.version>3.3.4</spring-boot.version>
         <!-- Override the Byte Buddy version managed by Spring Boot 3.3.4
              (1.14.x, which only supports up to JDK 23) so that Mockito's

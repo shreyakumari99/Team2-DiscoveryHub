@@ -57,6 +57,9 @@ volumes/
 .env.local
 *.local
 
+# ---------- Generated reports ----------
+reports/
+
 # ---------- Misc ----------
 *.tmp
 *.bak
