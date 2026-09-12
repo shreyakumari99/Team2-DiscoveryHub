@@ -374,6 +374,21 @@ export class Api {
     );
   }
 
+  /**
+   * Bulk fetch by archive id. Used to read authoritative per-message state —
+   * notably `held` — for a set of ids the caller already has (FR-4.4).
+   *
+   * <p>Unknown ids are omitted by the archive rather than failing the batch, so
+   * a message disposed of after being attached as evidence does not break the
+   * caller. Callers must not pass an empty array: the archive requires the
+   * `ids` parameter and would answer 400.
+   */
+  getMessages(ids: string[]): Observable<ArchivedMessage[]> {
+    return this.http.get<ArchivedMessage[]>(MESSAGES_URL, {
+      params: this.params({ ids }),
+    });
+  }
+
   /** Deletes a message directly — refused with 409 if it is on hold (FR-4.6). */
   deleteMessage(id: string, reason = 'manual'): Observable<unknown> {
     return this.http.delete(`${MESSAGES_URL}/${id}`, { params: { reason } });

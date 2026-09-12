@@ -106,12 +106,28 @@
 
       <table>
         <thead>
-          <tr><th>Message</th><th>Source</th><th>Added</th><th></th></tr>
+          <tr><th>Message</th><th>Hold</th><th>Source</th><th>Added</th><th></th></tr>
         </thead>
         <tbody>
           @for (e of evidence(); track e.id) {
             <tr>
               <td class="mono">{{ e.messageId }}</td>
+              <td>
+                @switch (holdStateOf(e.messageId)) {
+                  @case ('HELD') {
+                    <span class="badge held">on hold</span>
+                  }
+                  @case ('UNKNOWN') {
+                    <span
+                      class="muted small"
+                      title="archive-service could not be reached, so the hold state of this message is not known"
+                    >unknown</span>
+                  }
+                  @default {
+                    <span class="muted">—</span>
+                  }
+                }
+              </td>
               <td class="muted">{{ e.source }}</td>
               <td class="muted">{{ e.addedAt | date: 'short' }}</td>
               <td>
@@ -121,7 +137,7 @@
               </td>
             </tr>
           } @empty {
-            <tr><td colspan="4" class="empty">No evidence yet.</td></tr>
+            <tr><td colspan="5" class="empty">No evidence yet.</td></tr>
           }
         </tbody>
       </table>
