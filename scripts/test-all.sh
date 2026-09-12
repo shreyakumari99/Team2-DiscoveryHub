@@ -13,6 +13,7 @@
 #   --backend-only    skip the frontend
 #   --frontend-only   skip the backend
 #   --skip-coverage   run tests without generating coverage reports (faster)
+#   --open            open the coverage reports in a browser when done
 
 set -euo pipefail
 
@@ -22,16 +23,34 @@ cd "$REPO_ROOT"
 RUN_BACKEND=true
 RUN_FRONTEND=true
 COVERAGE=true
+OPEN_REPORTS=false
 
 for arg in "$@"; do
   case "$arg" in
     --backend-only)  RUN_FRONTEND=false ;;
     --frontend-only) RUN_BACKEND=false ;;
     --skip-coverage) COVERAGE=false ;;
-    -h|--help)       sed -n '2,16p' "$0"; exit 0 ;;
+    --open)          OPEN_REPORTS=true ;;
+    -h|--help)       sed -n '2,17p' "$0"; exit 0 ;;
     *) echo "Unknown option: $arg" >&2; exit 2 ;;
   esac
 done
+
+# Angular writes its report under an extra directory named after the project,
+# so the frontend path is coverage/frontend/, not coverage/.
+FRONTEND_REPORT="frontend/coverage/frontend/index.html"
+
+# Opens a file in the default browser, on macOS or Linux. Silent no-op if
+# neither opener exists (e.g. in CI), so --open can never fail a test run.
+open_in_browser() {
+  local file="$1"
+  [ -f "$file" ] || return 0
+  if command -v open >/dev/null 2>&1; then
+    open "$file"
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$file" >/dev/null 2>&1
+  fi
+}
 
 # shared-contracts and service-commons are dependencies of every service, so
 # they must be installed to the local repo before anything else resolves.
@@ -103,10 +122,21 @@ fi
 
 bold "All tests passed."
 if [ "$COVERAGE" = true ]; then
-  cat <<'REPORTS'
+  echo
+  echo "Coverage reports:"
+  for report in services/*/target/site/jacoco/index.html; do
+    [ -f "$report" ] && echo "  $report"
+  done
+  [ -f "$FRONTEND_REPORT" ] && echo "  $FRONTEND_REPORT"
+  echo
+  echo "Open them all with:   ./scripts/test-all.sh --open"
 
-Coverage reports:
-  Backend   services/<module>/target/site/jacoco/index.html
-  Frontend  frontend/coverage/index.html
-REPORTS
+  if [ "$OPEN_REPORTS" = true ]; then
+    echo
+    echo "Opening reports…"
+    for report in services/*/target/site/jacoco/index.html; do
+      open_in_browser "$report"
+    done
+    open_in_browser "$FRONTEND_REPORT"
+  fi
 fi
