@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Every service depends on shared-contracts and service-commons, so both are
+  # installed to the local repo before anything else can resolve.
+  # ---------------------------------------------------------------------------
+  libraries:
+    name: Build shared libraries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Install shared-contracts
+        working-directory: services/shared-contracts
+        run: mvn -B clean install
+      - name: Build & test service-commons
+        working-directory: services/service-commons
+        run: mvn -B clean install
+      - name: Upload service-commons coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-service-commons
+          path: services/service-commons/target/site/jacoco/
+          if-no-files-found: warn
+
+  backend:
+    name: Build & test ${{ matrix.service }}
+    needs: libraries
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - ingestion-service
+          - archive-service
+          - search-service
+          - case-service
+          - hold-retention-service
+          - export-service
+          - audit-service
+          - data-generator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Install shared libraries to local repo
+        run: |
+          mvn -B -f services/shared-contracts/pom.xml clean install -DskipTests
+          mvn -B -f services/service-commons/pom.xml clean install -DskipTests
+      - name: Build & test
+        working-directory: ${{ matrix.service == 'data-generator' && 'data-generator' || format('services/{0}', matrix.service) }}
+        run: mvn -B clean verify
+      # JaCoCo writes the report during `verify`; publishing it is what makes
+      # the coverage requirement in Deliverable 3 verifiable on every PR.
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.service }}
+          path: ${{ matrix.service == 'data-generator' && 'data-generator' || format('services/{0}', matrix.service) }}/target/site/jacoco/
+          if-no-files-found: warn
+
+  frontend:
+    name: Build & test frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Angular CLI 22.x requires Node >= 22.22.3; Node 20 fails the build.
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint --if-present
+      - name: Test with coverage
+        working-directory: frontend
+        run: npm run test:coverage
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-frontend
+          path: frontend/coverage/
+          if-no-files-found: warn
+      - name: Build
+        working-directory: frontend
+        run: npm run build -- --configuration production
